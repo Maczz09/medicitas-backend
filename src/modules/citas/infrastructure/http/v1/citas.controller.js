@@ -1,35 +1,88 @@
-const CitasUseCases = require('../../../application/citas.usecases');
-const MySQLCitasRepository = require('../../mysql.citas.repository');
-
-const repository = new MySQLCitasRepository();
-const citasUseCases = new CitasUseCases(repository);
-
-exports.reservar = async (req, res, next) => {
-  try {
-    const cita = await citasUseCases.reservarCita(req.body, req.correlationId);
-    res.status(201).json({ data: cita, correlationId: req.correlationId });
-  } catch (err) {
-    next(err);
+class CitasController {
+  constructor({
+    reservarCitaUseCase,
+    cancelarCitaUseCase,
+    reprogramarCitaUseCase,
+    registrarIngresoUseCase,
+    completarCitaUseCase,
+    consultarCitaUseCase
+  }) {
+    this.reservarCitaUC = reservarCitaUseCase;
+    this.cancelarCitaUC = cancelarCitaUseCase;
+    this.reprogramarCitaUC = reprogramarCitaUseCase;
+    this.registrarIngresoUC = registrarIngresoUseCase;
+    this.completarCitaUC = completarCitaUseCase;
+    this.consultarCitaUC = consultarCitaUseCase;
   }
-};
 
-exports.cancelar = async (req, res, next) => {
-  try {
-    await citasUseCases.cancelarCita(req.params.id, req.body.motivo, req.correlationId);
-    res.status(200).json({ mensaje: 'Cita cancelada', correlationId: req.correlationId });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.obtenerPorId = async (req, res, next) => {
-  try {
-    const cita = await repository.findById(req.params.id);
-    if (!cita) {
-      return res.status(404).json({ error: 'Cita no encontrada' });
+  reservarCita = async (req, res, next) => {
+    try {
+      const result = await this.reservarCitaUC.ejecutar(req.body, req.correlationId);
+      res.status(201).json(result);
+    } catch (error) {
+      next(error);
     }
-    res.status(200).json({ data: cita, correlationId: req.correlationId });
-  } catch (err) {
-    next(err);
-  }
-};
+  };
+
+  consultarCita = async (req, res, next) => {
+    try {
+      const result = await this.consultarCitaUC.ejecutar(req.params.id);
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  cancelarCita = async (req, res, next) => {
+    try {
+      const result = await this.cancelarCitaUC.ejecutar(
+        { idCita: req.params.id, motivo: req.body.motivo }, 
+        req.correlationId
+      );
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  reprogramarCita = async (req, res, next) => {
+    try {
+      const result = await this.reprogramarCitaUC.ejecutar(
+        { 
+          idCita: req.params.id, 
+          nuevaFechaHora: req.body.nuevaFechaHora,
+          idMedico: req.body.idMedico 
+        }, 
+        req.correlationId
+      );
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  registrarIngreso = async (req, res, next) => {
+    try {
+      const result = await this.registrarIngresoUC.ejecutar(
+        { idCita: req.params.id }, 
+        req.correlationId
+      );
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  completarCita = async (req, res, next) => {
+    try {
+      const result = await this.completarCitaUC.ejecutar(
+        { idCita: req.params.id }
+      );
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+module.exports = { CitasController };
