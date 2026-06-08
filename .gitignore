@@ -1,0 +1,8 @@
+node_modules/
+.env
+db_data/
+mysql_data/
+redis_data/
+rabbitmq_data/
+.DS_Store
+*.log
