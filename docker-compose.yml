@@ -103,6 +103,7 @@ services:
     volumes:
       # Volúmenes para desarrollo (hot-reloading)
       - ./src:/app/src
+      - comprobantes_storage:/app/storage/comprobantes
 
   # ─── WORKERS (PM2 administra Outbox + Tolerancia) ─────────
   workers:
@@ -152,6 +153,7 @@ volumes:
   mysql_data:
   redis_data:
   rabbitmq_data:
+  comprobantes_storage:
 
 networks:
   medicitas_net:

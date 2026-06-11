@@ -10,6 +10,10 @@ async function connect() {
     
     await channel.assertExchange('medicitas.events', 'topic', { durable: true });
     
+    // Facturacion
+    await channel.assertQueue('q.facturacion', { durable: true });
+    await channel.bindQueue('q.facturacion', 'medicitas.events', 'event.PagoAprobado');
+
     console.log('[RabbitMQ] Conectado exitosamente y Exchange declarado');
   } catch (err) {
     console.error('[RabbitMQ] Error de conexión:', err);

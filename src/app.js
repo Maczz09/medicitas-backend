@@ -9,12 +9,12 @@ const { checkIdempotency } = require('./shared/infrastructure/api_idempotency.mi
 const authRouter = require('./modules/auth/infrastructure/http/v1/auth.routes');
 const pacientesRouter = require('./modules/pacientes/infrastructure/http/v1/pacientes.routes');
 const medicosRouter = require('./modules/medicos/infrastructure/http/v1/medicos.routes');
-const citasRouter = require('./modules/citas/infrastructure/http/v1/citas.routes');
-const segurosRouter = require('./modules/seguros/infrastructure/http/v1/seguros.routes');
-const pagosRouter = require('./modules/pagos/infrastructure/http/v1/pagos.routes');
+const citasRoutes = require('./modules/citas/infrastructure/http/v1/citas.routes');
+const segurosRoutes = require('./modules/seguros/routes/seguros.routes');
+const pagosRouter = require('./modules/pagos/routes/pagos.routes');
 const hclRouter = require('./modules/historiaClinica/routes/historiaClinica.routes');
 const preRouter = require('./modules/prescripciones/infrastructure/http/v1/pre.routes');
-const facRouter = require('./modules/facturacion/infrastructure/http/v1/fac.routes');
+const facRouter = require('./modules/facturacion/routes/facturacion.routes');
 
 const app = express();
 
@@ -27,8 +27,8 @@ app.use(checkIdempotency);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/pacientes', pacientesRouter);
 app.use('/api/v1/medicos', medicosRouter);
-app.use('/api/v1/citas', citasRouter);
-app.use('/api/v1/seguros', segurosRouter);
+app.use('/api/v1/citas', citasRoutes);
+app.use('/api/v1/coberturas', segurosRoutes);
 app.use('/api/v1/pagos', pagosRouter);
 app.use('/api/v1/historias-clinicas', hclRouter);
 app.use('/api/v1/prescripciones', preRouter);
