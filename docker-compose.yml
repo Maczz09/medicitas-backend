@@ -85,10 +85,20 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/medicitas
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
-      ASEGURADORA_API_URL: ${ASEGURADORA_API_URL}
-      FARMACIA_API_URL: ${FARMACIA_API_URL}
-      SMS_API_URL: ${SMS_API_URL}
-      SMS_API_KEY: ${SMS_API_KEY}
+      ASEGURADORA_API_URL:  ${ASEGURADORA_API_URL}
+      ASEGURADORA_API_KEY:  ${ASEGURADORA_API_KEY}
+      USE_MOCK_SEGURO:      ${USE_MOCK_SEGURO:-false}
+      FARMACIA_API_URL:     ${FARMACIA_API_URL}
+      SMS_API_URL:          ${SMS_API_URL}
+      SMS_API_KEY:          ${SMS_API_KEY}
+      # Resiliencia
+      HTTP_TIMEOUT_MS:      ${HTTP_TIMEOUT_MS:-3000}
+      CB_TIMEOUT_MS:        ${CB_TIMEOUT_MS:-3500}
+      CB_ERROR_THRESHOLD:   ${CB_ERROR_THRESHOLD:-50}
+      CB_RESET_TIMEOUT_MS:  ${CB_RESET_TIMEOUT_MS:-30000}
+      RETRY_MAX_INTENTOS:   ${RETRY_MAX_INTENTOS:-3}
+      RETRY_BASE_MS:        ${RETRY_BASE_MS:-200}
+      RETRY_MAX_MS:         ${RETRY_MAX_MS:-2000}
     depends_on:
       mysql:
         condition: service_healthy
@@ -98,6 +108,7 @@ services:
         condition: service_healthy
     networks:
       - medicitas_net
+      - medicitas_shared_net
     expose:
       - "3000"
     volumes:
@@ -158,3 +169,5 @@ volumes:
 networks:
   medicitas_net:
     driver: bridge
+  medicitas_shared_net:
+    external: true

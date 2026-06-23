@@ -70,8 +70,8 @@ class EncuentroMySQLRepository {
     const { medicamento, dosis, indicaciones, cantidad } = prescripcion.contenido;
     await connection.execute(
       `INSERT INTO svc_hcl.prescripciones_clinicas 
-       (id_prescripcion, id_encuentro, id_paciente, medicamento, dosis, frecuencia, duracion, indicaciones)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id_prescripcion, id_encuentro, id_paciente, medicamento, dosis, frecuencia, duracion, cantidad, indicaciones)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         prescripcion.id, 
         prescripcion.idEncuentro, 
@@ -79,7 +79,8 @@ class EncuentroMySQLRepository {
         medicamento, 
         dosis, 
         'No especificado', // El ValueObject no tenía frecuencia
-        cantidad || '1',   // El ValueObject usaba cantidad
+        null,              // duracion
+        cantidad || 1,     // nueva columna cantidad
         indicaciones || null
       ]
     );

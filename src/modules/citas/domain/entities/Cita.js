@@ -9,7 +9,7 @@ const CitaEstado = Object.freeze({
 });
 
 class Cita {
-  constructor({ id, idPaciente, idMedico, fechaHora, especialidad, estado, correlationId, alertaMin0, alertaMin5, alertaMin10 }) {
+  constructor({ id, idPaciente, idMedico, fechaHora, especialidad, estado, correlationId, recordatorio30m, alertaMin0, alertaMin5, alertaMin10 }) {
     this.id            = id;
     this.idPaciente    = idPaciente;
     this.idMedico      = idMedico;
@@ -19,6 +19,7 @@ class Cita {
     this.correlationId = correlationId || null;
     
     // Flags de tolerance worker
+    this.recordatorio30m = recordatorio30m || false;
     this.alertaMin0    = alertaMin0 || false;
     this.alertaMin5    = alertaMin5 || false;
     this.alertaMin10   = alertaMin10 || false;

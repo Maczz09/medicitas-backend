@@ -13,8 +13,10 @@ const citasRoutes = require('./modules/citas/infrastructure/http/v1/citas.routes
 const segurosRoutes = require('./modules/seguros/routes/seguros.routes');
 const pagosRouter = require('./modules/pagos/routes/pagos.routes');
 const hclRouter = require('./modules/historiaClinica/routes/historiaClinica.routes');
-const preRouter = require('./modules/prescripciones/infrastructure/http/v1/pre.routes');
+const preRouter = require('./modules/prescripciones/routes/prescripciones.routes');
 const facRouter = require('./modules/facturacion/routes/facturacion.routes');
+const audRouter = require('./modules/auditoria/routes/auditoria.routes');
+const notRouter = require('./modules/notificaciones/routes/notificaciones.routes');
 
 const app = express();
 
@@ -33,6 +35,8 @@ app.use('/api/v1/pagos', pagosRouter);
 app.use('/api/v1/historias-clinicas', hclRouter);
 app.use('/api/v1/prescripciones', preRouter);
 app.use('/api/v1/facturacion', facRouter);
+app.use('/api/v1/auditoria', audRouter);
+app.use('/api/v1/notificaciones', notRouter);
 
 // Ruta Swagger
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));

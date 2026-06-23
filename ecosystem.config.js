@@ -10,11 +10,19 @@ module.exports = {
     },
     {
       name: 'worker-tolerancia',
-      script: './workers/tolerancia.worker.js',
+      script: './workers/tolerancia.cron.js',
       instances: 1,
+      exec_mode: 'cluster',
       autorestart: true,
-      watch: false,
-      env: { NODE_ENV: 'production' }
+      watch: false
+    },
+    {
+      name: 'worker-alertas-llegada',
+      script: './workers/alertas_llegada.cron.js',
+      instances: 1,
+      exec_mode: 'cluster',
+      autorestart: true,
+      watch: false
     }
   ]
 };

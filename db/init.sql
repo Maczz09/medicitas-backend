@@ -493,13 +493,17 @@ CREATE TABLE IF NOT EXISTS encuentros_clinicos (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS prescripciones_clinicas (
-  id              VARCHAR(36)   NOT NULL,
+  id_prescripcion VARCHAR(36)   NOT NULL DEFAULT (uuid()),
   id_encuentro    VARCHAR(36)   NOT NULL,
-  id_medico       VARCHAR(36)   NOT NULL,
-  contenido       JSON          NOT NULL,
+  id_paciente     VARCHAR(36)   NOT NULL,
+  medicamento     VARCHAR(200)  NOT NULL,
+  dosis           VARCHAR(100)  NOT NULL,
+  frecuencia      VARCHAR(100)  NOT NULL,
+  duracion        VARCHAR(100)  NULL,
+  cantidad        INT           NOT NULL DEFAULT 1,
+  indicaciones    TEXT          NULL,
   created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  FOREIGN KEY (id_encuentro) REFERENCES encuentros_clinicos(id) ON DELETE CASCADE
+  PRIMARY KEY (id_prescripcion)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS outbox (

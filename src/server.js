@@ -41,6 +41,64 @@ async function bootstrap() {
     const facturacionConsumer = new FacturacionConsumer(rabbitmq.getChannel(), generarUseCase);
     await facturacionConsumer.iniciar();
 
+    // Wiring de dependencias del consumer de Auditoría
+    const { AuditoriaConsumer }      = require('./modules/auditoria/consumer/auditoria.consumer');
+    const { TrazasMySQLRepository }  = require('./modules/auditoria/adapters/out/repositories/TrazasMySQLRepository');
+    const { RegistrarEventoUseCase } = require('./modules/auditoria/application/use-cases/RegistrarEventoUseCase');
+    
+    const trazasRepo = new TrazasMySQLRepository(database);
+    const registrarEventoUseCase = new RegistrarEventoUseCase({ trazasRepository: trazasRepo });
+    
+    const auditoriaConsumer = new AuditoriaConsumer(rabbitmq.getChannel(), registrarEventoUseCase);
+    await auditoriaConsumer.iniciar();
+
+    // Wiring de dependencias del consumer de Notificaciones
+    const { NotificacionesConsumer }     = require('./modules/notificaciones/consumer/notificaciones.consumer');
+    const { MensajesSMSMySQLRepository } = require('./modules/notificaciones/adapters/out/repositories/MensajesSMSMySQLRepository');
+    const { PacienteHttpAdapter: NotificacionesPacienteHttpAdapter }        = require('./modules/notificaciones/adapters/out/http/PacienteHttpAdapter');
+    const { OutboxMySQLPublisher: NotificacionesOutboxMySQLPublisher }       = require('./modules/notificaciones/adapters/out/events/OutboxMySQLPublisher');
+    const { SMSMockAdapter }             = require('./modules/notificaciones/adapters/out/gateway/SMSMockAdapter');
+    const { SMSAxiosAdapter }            = require('./modules/notificaciones/adapters/out/gateway/SMSAxiosAdapter');
+    const { NotificarPacienteUseCase }   = require('./modules/notificaciones/application/use-cases/NotificarPacienteUseCase');
+
+    const gateway = process.env.USE_MOCK_SMS === 'true' || true // Forzamos MOCK por ahora hasta tener vars reales
+      ? new SMSMockAdapter()
+      : new SMSAxiosAdapter();
+
+    const useCase = new NotificarPacienteUseCase({
+      mensajesSMSRepository: new MensajesSMSMySQLRepository(database),
+      smsGateway:            gateway,
+      pacienteTelefono:      new NotificacionesPacienteHttpAdapter(),
+      eventPublisher:        new NotificacionesOutboxMySQLPublisher(),
+      getConnection:         async () => await database.getConnection(),
+    });
+
+    const notificacionesConsumer = new NotificacionesConsumer(rabbitmq.getChannel(), useCase);
+    await notificacionesConsumer.iniciar();
+
+    // Wiring de dependencias del consumer de Prescripciones
+    const { PrescripcionesConsumer } = require('./modules/prescripciones/consumer/prescripciones.consumer');
+    const DespachosMySQLRepository = require('./modules/prescripciones/adapters/out/DespachosMySQLRepository');
+    const OutboxEventPublisher = require('./modules/prescripciones/adapters/out/OutboxEventPublisher');
+    const IniciarDespachoUseCase = require('./modules/prescripciones/application/use-cases/IniciarDespachoUseCase');
+    const FarmaciaMockAdapter = require('./modules/prescripciones/adapters/out/gateway/FarmaciaMockAdapter');
+    const FarmaciaAxiosAdapter = require('./modules/prescripciones/adapters/out/gateway/FarmaciaAxiosAdapter');
+
+    const preGateway = process.env.USE_MOCK_FARMACIA === 'true'
+      ? new FarmaciaMockAdapter()
+      : new FarmaciaAxiosAdapter();
+
+    const iniciarDespachoUseCaseObj = new IniciarDespachoUseCase({
+      despachosRepository: new DespachosMySQLRepository(),
+      farmaciaGateway: preGateway,
+      eventPublisher: new OutboxEventPublisher(),
+      getConnection: async () => await database.getConnection(),
+      logger: require('./shared/logger/logger')
+    });
+
+    const prescripcionesConsumer = new PrescripcionesConsumer(rabbitmq.getChannel(), iniciarDespachoUseCaseObj);
+    await prescripcionesConsumer.iniciar();
+
     app.listen(PORT, () => {
       console.log(`[Servidor] Escuchando en el puerto ${PORT} - Entorno: ${process.env.NODE_ENV}`);
     });

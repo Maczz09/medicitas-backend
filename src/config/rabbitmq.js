@@ -14,6 +14,32 @@ async function connect() {
     await channel.assertQueue('q.facturacion', { durable: true });
     await channel.bindQueue('q.facturacion', 'medicitas.events', 'event.PagoAprobado');
 
+    // Auditoria
+    await channel.assertQueue('q.auditoria.dlq', { durable: true });
+    await channel.assertQueue('q.auditoria', {
+      durable: true,
+      arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.auditoria.dlq' }
+    });
+    await channel.bindQueue('q.auditoria', 'medicitas.events', '#');
+
+    // Notificaciones
+    await channel.assertQueue('q.notificaciones.dlq', { durable: true });
+    await channel.assertQueue('q.notificaciones', {
+      durable: true,
+      arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.notificaciones.dlq' }
+    });
+    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'citas.*');
+    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'pagos.PagoAprobado');
+    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'facturacion.ComprobanteEmitido');
+
+    // Prescripciones
+    await channel.assertQueue('q.prescripciones.dlq', { durable: true });
+    await channel.assertQueue('q.prescripciones', {
+      durable: true,
+      arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.prescripciones.dlq' }
+    });
+    await channel.bindQueue('q.prescripciones', 'medicitas.events', 'event.PrescripcionEmitida');
+
     console.log('[RabbitMQ] Conectado exitosamente y Exchange declarado');
   } catch (err) {
     console.error('[RabbitMQ] Error de conexión:', err);
