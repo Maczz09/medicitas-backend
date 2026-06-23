@@ -1,10 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { swaggerUi, specs } = require('./config/swagger');
 const { correlationMiddleware } = require('./shared/infrastructure/correlation.middleware');
 const { errorHandler } = require('./shared/infrastructure/error.middleware');
 const { checkIdempotency } = require('./shared/infrastructure/api_idempotency.middleware');
+const { metricsMiddleware } = require('./shared/infrastructure/metrics.middleware');
+const { register } = require('./config/metrics');
 
 const authRouter = require('./modules/auth/infrastructure/http/v1/auth.routes');
 const pacientesRouter = require('./modules/pacientes/infrastructure/http/v1/pacientes.routes');
@@ -20,13 +23,42 @@ const notRouter = require('./modules/notificaciones/routes/notificaciones.routes
 
 const app = express();
 
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX || '200'),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiadas peticiones. Intenta de nuevo más tarde.' },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_AUTH_MAX || '20'),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos de autenticación. Intenta de nuevo en 15 minutos.' },
+});
+
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+app.use(metricsMiddleware);
 app.use(correlationMiddleware);
 app.use(checkIdempotency);
 
-app.use('/api/v1/auth', authRouter);
+// Endpoint de métricas para Prometheus (solo accesible internamente)
+app.get('/metrics', async (req, res) => {
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (err) {
+    res.status(500).end(err.message);
+  }
+});
+
+app.use('/api/', apiLimiter);
+
+app.use('/api/v1/auth', authLimiter, authRouter);
 app.use('/api/v1/pacientes', pacientesRouter);
 app.use('/api/v1/medicos', medicosRouter);
 app.use('/api/v1/citas', citasRoutes);

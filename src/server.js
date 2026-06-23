@@ -7,6 +7,15 @@ const rabbitmq = require('./config/rabbitmq');
 const PORT = process.env.PORT || 3000;
 
 async function bootstrap() {
+  // El servidor HTTP arranca primero para que /metrics y /api-docs
+  // estén disponibles incluso si la infra aún no está lista
+  await new Promise((resolve) => {
+    app.listen(PORT, () => {
+      console.log(`[Servidor] Escuchando en el puerto ${PORT} - Entorno: ${process.env.NODE_ENV}`);
+      resolve();
+    });
+  });
+
   try {
     await database.query('SELECT 1');
     console.log('[MySQL] Conectado exitosamente');
@@ -99,12 +108,13 @@ async function bootstrap() {
     const prescripcionesConsumer = new PrescripcionesConsumer(rabbitmq.getChannel(), iniciarDespachoUseCaseObj);
     await prescripcionesConsumer.iniciar();
 
-    app.listen(PORT, () => {
-      console.log(`[Servidor] Escuchando en el puerto ${PORT} - Entorno: ${process.env.NODE_ENV}`);
-    });
   } catch (err) {
-    console.error('[Bootstrap] Error crítico al iniciar:', err);
-    process.exit(1);
+    console.error('[Bootstrap] Error al conectar con la infraestructura:', err.message || err);
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    } else {
+      console.warn('[Bootstrap] Modo desarrollo: el servidor sigue activo sin infra. /metrics y /api-docs disponibles.');
+    }
   }
 }
 
