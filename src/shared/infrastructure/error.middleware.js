@@ -17,6 +17,11 @@ function errorHandler(err, req, res, next) {
     mensaje = err.message || mensaje;
   }
 
+  // Red de seguridad: si el status no es un entero HTTP válido, usar 500.
+  if (!Number.isInteger(status) || status < 100 || status > 599) {
+    status = 500;
+  }
+
   return res.status(status).json({
     codigo,
     mensaje,

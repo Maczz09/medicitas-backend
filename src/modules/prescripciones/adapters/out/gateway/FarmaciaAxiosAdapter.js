@@ -1,4 +1,6 @@
 const axios = require('axios');
+const http  = require('http');
+const https = require('https');
 const { crearCircuitBreakerFarmacia } = require('./circuit-breaker/circuitBreakerFarmaciaConfig');
 const logger = require('../../../../../shared/logger/logger');
 
@@ -18,16 +20,33 @@ const logger = require('../../../../../shared/logger/logger');
  */
 class FarmaciaAxiosAdapter {
   constructor() {
+    // Bulkhead: agente HTTP propio con maxSockets acotado — aísla este adaptador
+    // del pool global de Node.js para que una caída de farmacia-api no agote
+    // los sockets disponibles para el resto de llamadas salientes del proceso.
     this.client = axios.create({
-      // 4500ms: ligeramente menor que CB_TIMEOUT_MS_FARMACIA (5000ms)
-      // para que Opossum mida el timeout antes de que axios lo haga.
       timeout: parseInt(process.env.CB_TIMEOUT_MS_FARMACIA || '5000') - 500,
       headers: { Authorization: `Bearer ${process.env.FARMACIA_API_KEY}` },
-      // Nunca lanzar por status HTTP — decidimos nosotros qué hacer con cada código.
       validateStatus: () => true,
+      httpAgent:  new http.Agent({ maxSockets: 20 }),
+      httpsAgent: new https.Agent({ maxSockets: 20 }),
     });
 
     this.breaker = crearCircuitBreakerFarmacia(this._llamadaReal.bind(this));
+    this._onRecuperacion = null;
+    this.breaker.on('close', () => this._dispararRecuperacion());
+  }
+
+  registrarRecuperacion(fn) {
+    this._onRecuperacion = fn;
+  }
+
+  async _dispararRecuperacion() {
+    if (!this._onRecuperacion) return;
+    try {
+      await this._onRecuperacion();
+    } catch (err) {
+      logger.error({ err }, '[FarmaciaAxiosAdapter] Error en recovery replay tras cierre del circuito');
+    }
   }
 
   /**

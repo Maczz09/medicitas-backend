@@ -1,34 +1,55 @@
 const logger = require('../../../../../shared/logger/logger');
 
 class FarmaciaMockAdapter {
-  async enviarReceta({ idDespacho, idFarmacia, contenido }) {
-    logger.info({ idDespacho, idFarmacia }, '[MOCK] Simulando envío de receta a FarmaciaMockAdapter');
+  // Misma firma que FarmaciaAxiosAdapter — contrato del puerto IFarmaciaGateway:
+  //   enviarReceta({ idReceta, farmaciaId, medicamento, dosis, cantidad })
+  //   → { aceptada, referenciaFarmacia, motivoRechazo, origenFallo }
+  async enviarReceta({ idReceta, farmaciaId, medicamento, dosis, cantidad }) {
+    logger.info({ idReceta, farmaciaId }, '[MOCK] Simulando envío de receta a FarmaciaMockAdapter');
 
     await this._simularLatencia(150, 400);
 
-    const medicamento = (contenido?.medicamento || '').toUpperCase();
+    const med = (medicamento || '').toUpperCase();
 
-    if (medicamento.includes('TIMEOUT')) {
-      await this._simularLatencia(8000, 10000); // Supera el CB_TIMEOUT_MS_FARMACIA
+    // Escenario: Timeout — supera CB_TIMEOUT_MS_FARMACIA (para probar Circuit Breaker)
+    if (med.includes('TIMEOUT')) {
+      await this._simularLatencia(8000, 10000);
     }
 
-    if (medicamento.includes('ERROR')) {
+    // Escenario: Error 500 — cuenta como falla de disponibilidad en el CB
+    if (med.includes('ERROR')) {
       throw new Error('[MOCK] Farmacia devolvió error 500 interno');
     }
 
-    if (medicamento.includes('SIN-STOCK')) {
+    // Escenario: Error 400/401 — error de configuración (NO debe abrir el CB gracias a errorFilter)
+    // Trigger: incluir 'CONFIG-ERROR' en el nombre del medicamento
+    if (med.includes('CONFIG-ERROR')) {
+      const err = new Error('[MOCK] Farmacia rechazó la request por datos de configuración inválidos (400)');
+      err.esErrorDeConfiguracion = true;
+      throw err;
+    }
+
+    // Escenario: Sin stock — rechazo de negocio (aceptada: false, origenFallo: 'NEGOCIO')
+    if (med.includes('SIN-STOCK')) {
       return {
-        estado: 'RECHAZADA',
+        aceptada: false,
+        referenciaFarmacia: null,
         motivoRechazo: 'Stock insuficiente para el medicamento solicitado',
+        origenFallo: 'NEGOCIO',
       };
     }
 
+    // Escenario por defecto: receta aceptada
     return {
-      estado: 'DESPACHADA',
-      referenciaFarmacia: `FARM-REF-${Date.now()}`,
-      observacionFarmacia: 'Receta validada y lista para entrega en mostrador',
+      aceptada: true,
+      referenciaFarmacia: `FARM-MOCK-${Date.now()}`,
+      motivoRechazo: null,
+      origenFallo: null,
     };
   }
+
+  // No-op: el mock no tiene Circuit Breaker, no hay nada que recuperar
+  registrarRecuperacion(_fn) {}
 
   _simularLatencia(minMs, maxMs) {
     const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;

@@ -1,6 +1,13 @@
 const { ForbiddenError, UnauthorizedError } = require('../domain/errors');
 
 function requireRole(...nombresRoles) {
+  // Acepta ambas convenciones de llamada usadas en el proyecto:
+  //   requireRole('Recepcionista', 'Médico')   → rest params
+  //   requireRole(['Recepcionista', 'Médico']) → un único array
+  // y normaliza a mayúsculas para tolerar 'RECEPCIONISTA' vs 'Recepcionista'.
+  const rolesPermitidos = nombresRoles.flat();
+  const permitidosUpper = rolesPermitidos.map((r) => String(r).toUpperCase());
+
   return async (req, res, next) => {
     try {
       if (!req.user) {
@@ -12,10 +19,10 @@ function requireRole(...nombresRoles) {
         return next();
       }
 
-      if (!nombresRoles.includes(req.user.rolNombre)) {
-        throw new ForbiddenError(`Se requiere uno de los roles: ${nombresRoles.join(', ')}`);
+      if (!permitidosUpper.includes(String(req.user.rolNombre).toUpperCase())) {
+        throw new ForbiddenError(`Se requiere uno de los roles: ${rolesPermitidos.join(', ')}`);
       }
-      
+
       next();
     } catch (err) {
       next(err);

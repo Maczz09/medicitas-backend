@@ -32,6 +32,7 @@ const { requireRole } = require('../../../../../shared/infrastructure/rbac.middl
  *       201:
  *         description: Médico creado
  */
+router.get('/', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), controller.getAll);
 router.post('/', verifyToken, requireRole('Auditor'), controller.createMedico);
 
 /**

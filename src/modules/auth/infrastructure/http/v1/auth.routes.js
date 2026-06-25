@@ -137,6 +137,17 @@ router.post('/register', verifyToken, requireRole('Auditor', 'Recepcionista'), c
 
 /**
  * @swagger
+ * /api/v1/auth/usuarios:
+ *   get:
+ *     summary: Listar usuarios del sistema (paginado + búsqueda) — Solo Auditor
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/usuarios', verifyToken, requireRole('Auditor'), controller.listUsuarios);
+
+/**
+ * @swagger
  * /api/v1/auth/usuarios/{id}/rol:
  *   put:
  *     summary: Asignar un nuevo rol a un usuario (Solo Auditor)

@@ -18,6 +18,10 @@ class MedicosUseCases {
     return nuevoMedico;
   }
 
+  async listMedicos() {
+    return this.medicosRepository.findAll();
+  }
+
   async getDisponibilidadBase(idMedico) {
     const medico = await this.medicosRepository.findById(idMedico);
     if (!medico) throw new MedicoNotFoundError();

@@ -29,6 +29,14 @@ class DespachosMySQLRepository {
     return this._mapToDomain(rows[0]);
   }
 
+  async findByEstado(estado, limit, db) {
+    const [rows] = await db.query(
+      'SELECT * FROM svc_pre.despachos WHERE estado = ? ORDER BY created_at ASC LIMIT ?',
+      [estado, limit]
+    );
+    return rows.map((r) => this._mapToDomain(r));
+  }
+
   async findByIdEventoOrigen(idEventoOrigen, dbOrConn) {
     const [rows] = await dbOrConn.query('SELECT * FROM svc_pre.despachos WHERE id_evento_origen = ?', [idEventoOrigen]);
     if (rows.length === 0) return null;

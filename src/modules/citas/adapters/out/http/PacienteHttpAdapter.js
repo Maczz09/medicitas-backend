@@ -10,8 +10,9 @@ class PacienteHttpAdapter extends IPacienteValidatorPort {
   }
 
   _generarInternalToken() {
+    // El RBAC valida req.user.rolNombre === 'INTERNAL' para el bypass S2S.
     return jwt.sign(
-      { id_usuario: 'svc-cit', rol: 'INTERNAL' },
+      { sub: 'svc-cit', rolNombre: 'INTERNAL' },
       process.env.JWT_SECRET,
       { expiresIn: '1m' }
     );

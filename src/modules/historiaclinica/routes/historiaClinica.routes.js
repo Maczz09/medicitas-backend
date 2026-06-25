@@ -12,6 +12,8 @@ const { ConsultarResumenClinicoUseCase }    = require('../application/use-cases/
 const { ConsultarHistoricoProfundoUseCase } = require('../application/use-cases/ConsultarHistoricoProfundoUseCase');
 const { RegistrarConsultaUseCase }          = require('../application/use-cases/RegistrarConsultaUseCase');
 const { HistoriaClinicaController }         = require('../adapters/in/HistoriaClinicaController');
+const { Expediente }                        = require('../domain/entities/Expediente');
+const { DomainError }                       = require('../../../shared/domain/errors');
 const pool = require('../../../config/database');
 
 const expRepo    = new ExpedienteMySQLRepository(pool);
@@ -31,6 +33,44 @@ const router = Router();
 
 // Middleware base: Validar Token en todas las rutas
 router.use(verifyToken);
+
+/**
+ * @swagger
+ * /api/v1/historias-clinicas/expedientes:
+ *   post:
+ *     summary: Crear (o recuperar) el expediente clínico de un paciente
+ *     tags: [Historia Clínica]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/expedientes', requireRole('Médico', 'Recepcionista'), async (req, res, next) => {
+  try {
+    const idPaciente = req.body.idPaciente || req.body.id_paciente;
+    if (!idPaciente) {
+      throw new DomainError('DATOS_INVALIDOS', 'idPaciente es obligatorio', 400);
+    }
+    // Idempotente: si ya existe expediente para el paciente, se devuelve.
+    const existente = await expRepo.findByIdPaciente(idPaciente);
+    if (existente) {
+      return res.status(200).json({ data: { id: existente.id, idPaciente }, yaExistia: true });
+    }
+    const expediente = new Expediente({
+      id: `HCL-${Date.now()}`,
+      idPaciente,
+      grupoSanguineo: req.body.grupoSanguineo || null,
+      alergias: req.body.alergias || [],
+    });
+    const conn = await connFn();
+    try {
+      await expRepo.save(expediente, conn);
+    } finally {
+      conn.release();
+    }
+    return res.status(201).json({ data: { id: expediente.id, idPaciente } });
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * @swagger

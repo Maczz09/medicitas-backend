@@ -1,13 +1,52 @@
 const MedicosUseCases = require('../../../application/medicos.usecases');
 const MySQLMedicosRepository = require('../../mysql.medicos.repository');
+const AuthUseCases = require('../../../../auth/application/auth.usecases');
+const MySQLAuthRepository = require('../../../../auth/infrastructure/mysql.auth.repository');
+const { DomainError } = require('../../../../../shared/domain/errors');
 
 const repository = new MySQLMedicosRepository();
 const medicosUseCases = new MedicosUseCases(repository);
+const authRepository = new MySQLAuthRepository();
+const authUseCases = new AuthUseCases(authRepository);
+
+exports.getAll = async (req, res, next) => {
+  try {
+    const data = await medicosUseCases.listMedicos();
+    res.status(200).json({ data, correlationId: req.correlationId });
+  } catch (err) {
+    next(err);
+  }
+};
 
 exports.createMedico = async (req, res, next) => {
   try {
-    const medico = await medicosUseCases.createMedico(req.body);
-    res.status(201).json({ data: medico, correlationId: req.correlationId });
+    const { cmp, nombre, apellido, especialidad, email, password } = req.body;
+
+    // Si se va a crear cuenta de acceso, validar el correo ANTES de crear el médico
+    // para no dejar un médico huérfano si el usuario fallara por correo duplicado.
+    if (email) {
+      const existe = await authRepository.findUserByEmail(email);
+      if (existe) {
+        throw new DomainError('USER_CONFLICT', 'El correo ya está registrado', 409);
+      }
+    }
+
+    const medico = await medicosUseCases.createMedico({ cmp, nombre, apellido, especialidad });
+
+    // Creación completa: cuenta de usuario (rol Médico) vinculada al médico por id_medico.
+    let usuario = null;
+    if (email && password) {
+      usuario = await authUseCases.register({
+        nombre,
+        apellido,
+        email,
+        password,
+        rolNombre: 'Médico',
+        idMedico: medico.id_medico,
+      });
+    }
+
+    res.status(201).json({ data: { ...medico, usuario }, correlationId: req.correlationId });
   } catch (err) {
     next(err);
   }

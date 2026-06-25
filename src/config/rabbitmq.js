@@ -47,15 +47,20 @@ async function connect() {
   }
 }
 
-async function publishEvent(tipoEvento, payload, correlationId) {
+async function publishEvent(tipoEvento, payload, correlationId, idEvento, origen) {
   if (!channel) throw new Error('Canal de RabbitMQ no inicializado');
 
   const routingKey = `event.${tipoEvento}`;
-  const message = Buffer.from(JSON.stringify(payload));
+  const id = idEvento || require('uuid').v4();
+
+  // Los consumidores esperan un sobre { evento, idEvento, origen, payload, correlationId },
+  // no solo el payload. Sin esto, todos descartan el mensaje (Auditoría exige `origen`).
+  const sobre = { evento: tipoEvento, idEvento: id, origen: origen || 'desconocido', payload, correlationId };
+  const message = Buffer.from(JSON.stringify(sobre));
 
   channel.publish('medicitas.events', routingKey, message, {
     persistent: true,
-    messageId: require('uuid').v4(),
+    messageId: id,
     correlationId: correlationId,
     contentType: 'application/json'
   });

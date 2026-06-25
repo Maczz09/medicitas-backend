@@ -26,10 +26,12 @@ class AuthUseCases {
   _generateAccessToken(user) {
     return jwt.sign(
       {
+        sub: user.id_usuario, // estándar JWT; varios módulos (HCL) leen req.user.sub
         idUsuario: user.id_usuario,
         email: user.email,
         nombre: `${user.nombre} ${user.apellido}`,
         idRol: user.id_rol,
+        idMedico: user.id_medico || null, // vínculo médico↔usuario (agenda propia, etc.)
         rolNombre: user.rolNombre
       },
       process.env.JWT_SECRET,
@@ -95,7 +97,7 @@ class AuthUseCases {
     return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
-  async register({ nombre, apellido, email, password, rolNombre }) {
+  async register({ nombre, apellido, email, password, rolNombre, idMedico = null }) {
     if (!EMAIL_REGEX.test(email)) throw new AuthValidationError('Formato de correo inválido');
     if (!PASSWORD_REGEX.test(password)) {
       throw new AuthValidationError('La contraseña debe tener 8 caracteres, mayúscula, minúscula, número y carácter especial');
@@ -113,13 +115,26 @@ class AuthUseCases {
     await this.authRepository.createUser({
       id,
       idRol: rol.id_rol,
+      idMedico,
       nombre,
       apellido,
       email,
       passwordHash
     });
 
-    return { id, email, rol: rol.nombre };
+    return { id, email, rol: rol.nombre, idMedico };
+  }
+
+  async listUsuarios(q, page = 1, limit = 10) {
+    const p = Math.max(parseInt(page, 10) || 1, 1);
+    const l = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
+    const offset = (p - 1) * l;
+
+    const { data, total } = await this.authRepository.listUsuarios({ q, offset, limit: l });
+    return {
+      data,
+      meta: { total, page: p, limit: l, totalPages: Math.ceil(total / l) },
+    };
   }
 
   async generateOTP(email) {

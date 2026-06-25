@@ -5,6 +5,14 @@ async function checkIdempotency(req, res, next) {
     return next();
   }
 
+  // El middleware está registrado globalmente y, en algunas rutas, también de forma
+  // explícita. Sin esta guarda, la segunda ejecución vería la clave que insertó la
+  // primera (status NULL) y respondería 409 PETICION_EN_PROCESO en la primera petición.
+  if (req._idempotencyHandled) {
+    return next();
+  }
+  req._idempotencyHandled = true;
+
   const idempotencyKey = req.headers['idempotency-key'];
   if (!idempotencyKey) {
     return next(); // Si no envía header, no se aplica idempotencia

@@ -15,6 +15,7 @@ const { ValidarCoberturaUseCase } = require('../application/use-cases/ValidarCob
 const { ConsultarValidacionUseCase } = require('../application/use-cases/ConsultarValidacionUseCase');
 
 const dbPool = require('../../../config/database');
+const logger = require('../../../shared/logger/logger');
 
 // ── 1. Adaptadores ────────────────────────────────────────────────────────────
 const coberturaRepo     = new CoberturasMySQLRepository(dbPool);
@@ -46,6 +47,40 @@ const consultarValidacionUseCase = new ConsultarValidacionUseCase({
 const controller = new SegurosController({
   validarCoberturaUseCase,
   consultarValidacionUseCase
+});
+
+// ── 3b. Recovery Replay — se dispara cuando el CB de Seguros cierra (servicio recuperado) ──
+// Busca validaciones PENDIENTE (generadas por fallback mientras el CB estaba abierto)
+// y las re-evalúa contra la aseguradora real. Si el resultado cambia, se actualiza
+// el registro para que quede trazabilidad — no se revierte ningún pago automáticamente.
+const RECOVERY_LIMIT_SEGUROS = 20;
+aseguradoraGateway.registrarRecuperacion(async () => {
+  const pendientes = await coberturaRepo.findPendientes(RECOVERY_LIMIT_SEGUROS);
+  if (pendientes.length === 0) return;
+
+  logger.info({ total: pendientes.length }, '[Seguros] Recovery replay: reevaluando coberturas PENDIENTE');
+
+  for (const c of pendientes) {
+    try {
+      const resultado = await aseguradoraGateway.validarPoliza({
+        idPaciente:   c.idPaciente,
+        idAseguradora: c.idAseguradora,
+        numeroPoliza: c.numeroPoliza,
+        tipoConsulta: c.tipoConsulta,
+      });
+
+      // Si sigue siendo fallback, el CB volvió a abrirse — dejar para el próximo ciclo
+      if (resultado.esFallback) continue;
+
+      await coberturaRepo.actualizarResultado(c.id, resultado);
+      logger.info(
+        { id: c.id, anterior: 'PENDIENTE', nuevo: resultado.estadoCobertura },
+        '[Seguros] Cobertura reevaluada — revisar manualmente si el pago asociado requiere ajuste'
+      );
+    } catch (err) {
+      logger.error({ err, id: c.id }, '[Seguros] Recovery replay: fallo individual — continúa con siguiente');
+    }
+  }
 });
 
 // ── 4. Rutas ──────────────────────────────────────────────────────────────────

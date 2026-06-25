@@ -28,6 +28,51 @@ class CoberturasMySQLRepository {
     }
   }
 
+  async findPendientes(limit) {
+    const conn = await this.pool.getConnection();
+    try {
+      const [rows] = await conn.execute(
+        `SELECT id, id_paciente, id_aseguradora, numero_poliza, tipo_consulta, correlation_id
+         FROM svc_seg.validaciones_cobertura
+         WHERE estado_cobertura = 'PENDIENTE'
+         ORDER BY created_at ASC
+         LIMIT ?`,
+        [limit]
+      );
+      return rows.map((r) => ({
+        id:           r.id,
+        idPaciente:   r.id_paciente,
+        idAseguradora: r.id_aseguradora,
+        numeroPoliza: r.numero_poliza,
+        tipoConsulta: r.tipo_consulta,
+        correlationId: r.correlation_id,
+      }));
+    } finally {
+      conn.release();
+    }
+  }
+
+  async actualizarResultado(id, resultado) {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.execute(
+        `UPDATE svc_seg.validaciones_cobertura
+         SET estado_cobertura = ?, porcentaje_cobertura = ?,
+             codigo_autorizacion = ?, vigencia = ?, es_fallback = 0
+         WHERE id = ? AND estado_cobertura = 'PENDIENTE'`,
+        [
+          resultado.estadoCobertura,
+          resultado.porcentajeCobertura,
+          resultado.codigoAutorizacion,
+          resultado.vigencia,
+          id,
+        ]
+      );
+    } finally {
+      conn.release();
+    }
+  }
+
   async findById(id) {
     const conn = await this.pool.getConnection();
     try {

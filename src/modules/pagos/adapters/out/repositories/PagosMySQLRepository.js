@@ -1,6 +1,12 @@
 const { Pago } = require('../../../domain/entities/Pago');
 const { DomainError } = require('../../../../../shared/domain/errors');
 
+// Columnas reales de svc_pag.pagos:
+//   id_pago, id_cita, id_paciente, codigo_autorizacion, metodo_pago,
+//   monto_total, monto_cobertura, monto_copago, estado, tipo_comprobante,
+//   numero_comprobante, created_at, updated_at
+// (la tabla no tiene id_validacion_cobertura, observaciones ni correlation_id;
+//  esos campos del dominio no se persisten.)
 class PagosMySQLRepository {
   constructor(pool) {
     this.pool = pool;
@@ -10,11 +16,10 @@ class PagosMySQLRepository {
     const conn = await this.pool.getConnection();
     try {
       const [rows] = await conn.execute(
-        `SELECT id, id_cita, id_paciente, id_validacion_cobertura,
-                codigo_autorizacion_seguro, metodo_pago, monto_total,
-                monto_cubierto_seguro, monto_copago, tipo_comprobante,
-                estado, observaciones, correlation_id, created_at
-         FROM svc_pag.pagos WHERE id = ?`,
+        `SELECT id_pago, id_cita, id_paciente, codigo_autorizacion, metodo_pago,
+                monto_total, monto_cobertura, monto_copago, tipo_comprobante,
+                estado, numero_comprobante, created_at
+         FROM svc_pag.pagos WHERE id_pago = ?`,
         [id]
       );
       if (rows.length === 0) return null;
@@ -30,10 +35,9 @@ class PagosMySQLRepository {
     const conn = await this.pool.getConnection();
     try {
       const [rows] = await conn.execute(
-        `SELECT id, id_cita, id_paciente, id_validacion_cobertura,
-                codigo_autorizacion_seguro, metodo_pago, monto_total,
-                monto_cubierto_seguro, monto_copago, tipo_comprobante,
-                estado, observaciones, correlation_id, created_at
+        `SELECT id_pago, id_cita, id_paciente, codigo_autorizacion, metodo_pago,
+                monto_total, monto_cobertura, monto_copago, tipo_comprobante,
+                estado, numero_comprobante, created_at
          FROM svc_pag.pagos WHERE id_cita = ?`,
         [idCita]
       );
@@ -50,16 +54,13 @@ class PagosMySQLRepository {
     try {
       await connection.execute(
         `INSERT INTO svc_pag.pagos
-         (id, id_cita, id_paciente, id_validacion_cobertura,
-          codigo_autorizacion_seguro, metodo_pago, monto_total,
-          monto_cubierto_seguro, monto_copago, tipo_comprobante,
-          estado, observaciones, correlation_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id_pago, id_cita, id_paciente, codigo_autorizacion, metodo_pago,
+          monto_total, monto_cobertura, monto_copago, tipo_comprobante, estado)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          pago.id, pago.idCita, pago.idPaciente, pago.idValidacionCobertura,
-          pago.codigoAutorizacionSeguro, pago.metodoPago, pago.montoTotal,
-          pago.montoCubiertoSeguro, pago.montoCopago, pago.tipoComprobante,
-          pago.estado, pago.observaciones, pago.correlationId,
+          pago.id, pago.idCita, pago.idPaciente, pago.codigoAutorizacionSeguro,
+          pago.metodoPago, pago.montoTotal, pago.montoCubiertoSeguro,
+          pago.montoCopago, pago.tipoComprobante, pago.estado,
         ]
       );
     } catch (err) {
@@ -74,10 +75,8 @@ class PagosMySQLRepository {
   async update(pago, connection) {
     try {
       await connection.execute(
-        `UPDATE svc_pag.pagos
-         SET estado = ?, observaciones = ?, updated_at = NOW()
-         WHERE id = ?`,
-        [pago.estado, pago.observaciones, pago.id]
+        `UPDATE svc_pag.pagos SET estado = ?, updated_at = NOW() WHERE id_pago = ?`,
+        [pago.estado, pago.id]
       );
     } catch (err) {
       throw new DomainError('ERROR_INTERNO_PAG', 500, 'Error al actualizar el pago');
@@ -86,19 +85,19 @@ class PagosMySQLRepository {
 
   _mapear(r) {
     return new Pago({
-      id:                       r.id,
+      id:                       r.id_pago,
       idCita:                   r.id_cita,
       idPaciente:               r.id_paciente,
-      idValidacionCobertura:    r.id_validacion_cobertura,
-      codigoAutorizacionSeguro: r.codigo_autorizacion_seguro,
+      idValidacionCobertura:    null,
+      codigoAutorizacionSeguro: r.codigo_autorizacion,
       metodoPago:               r.metodo_pago,
       montoTotal:               parseFloat(r.monto_total),
-      montoCubiertoSeguro:      parseFloat(r.monto_cubierto_seguro),
+      montoCubiertoSeguro:      parseFloat(r.monto_cobertura),
       montoCopago:              parseFloat(r.monto_copago),
       tipoComprobante:          r.tipo_comprobante,
       estado:                   r.estado,
-      observaciones:            r.observaciones,
-      correlationId:            r.correlation_id,
+      observaciones:            null,
+      correlationId:            null,
     });
   }
 }

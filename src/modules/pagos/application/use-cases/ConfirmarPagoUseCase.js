@@ -91,13 +91,13 @@ class ConfirmarPagoUseCase {
     try {
       // Verificar duplicado con SELECT FOR UPDATE antes de insertar
       const [duplicado] = await conn.execute(
-        `SELECT id FROM svc_pag.pagos WHERE id_cita = ? FOR UPDATE`,
+        `SELECT id_pago FROM svc_pag.pagos WHERE id_cita = ? FOR UPDATE`,
         [idCita]
       );
       if (duplicado.length > 0) {
         await conn.rollback();
         throw new DomainError('PAGO_DUPLICADO', 409,
-          `La cita ${idCita} ya tiene un pago registrado (id: ${duplicado[0].id})`);
+          `La cita ${idCita} ya tiene un pago registrado (id: ${duplicado[0].id_pago})`);
       }
 
       await this.pagosRepo.save(pago, conn);

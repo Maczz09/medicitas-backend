@@ -9,9 +9,10 @@ class OutboxMySQLPublisher {
     const id = uuidv4();
     const corrId = correlationId || uuidv4();
 
-    // Guardar el evento en la tabla outbox de SVC-PAG en la misma transacción
+    // Guardar el evento en la tabla outbox de SVC-PAG en la misma transacción.
+    // Columnas reales: id_evento, tipo_evento, payload, correlation_id.
     await connection.execute(
-      `INSERT INTO svc_pag.outbox (id, evento, payload, correlation_id) 
+      `INSERT INTO svc_pag.outbox (id_evento, tipo_evento, payload, correlation_id)
        VALUES (?, ?, ?, ?)`,
       [id, evento, JSON.stringify(payload), corrId]
     );

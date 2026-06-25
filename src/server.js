@@ -108,6 +108,32 @@ async function bootstrap() {
     const prescripcionesConsumer = new PrescripcionesConsumer(rabbitmq.getChannel(), iniciarDespachoUseCaseObj);
     await prescripcionesConsumer.iniciar();
 
+    // Recovery Replay — se dispara cuando el CB de Farmacia cierra (servicio recuperado).
+    // Busca despachos en RECHAZADA_POR_VALIDACION (fallback por caída de red/CB abierto,
+    // no RECHAZADA_POR_STOCK que es decisión de negocio real) y los reintenta.
+    // Máximo RECOVERY_LIMIT por evento de recuperación para no saturar farmacia-api recién levantada.
+    const RECOVERY_LIMIT_FARMACIA = 20;
+    const ReintentarEnvioUseCase = require('./modules/prescripciones/application/use-cases/ReintentarEnvioUseCase');
+    const recoveryRepo = new DespachosMySQLRepository();
+    const reintentarEnvioUseCase = new ReintentarEnvioUseCase({
+      despachosRepository: recoveryRepo,
+      iniciarDespachoUseCase: iniciarDespachoUseCaseObj,
+      getConnection: async () => await database.getConnection(),
+      logger: require('./shared/logger/logger'),
+    });
+
+    preGateway.registrarRecuperacion(async () => {
+      const logger = require('./shared/logger/logger');
+      const pendientes = await recoveryRepo.findByEstado('RECHAZADA_POR_VALIDACION', RECOVERY_LIMIT_FARMACIA, database);
+      if (pendientes.length === 0) return;
+
+      logger.info({ total: pendientes.length }, '[Farmacia] Recovery replay: reintentando despachos RECHAZADA_POR_VALIDACION');
+      for (const d of pendientes) {
+        await reintentarEnvioUseCase.ejecutar(d.id, d.correlationId)
+          .catch((err) => logger.warn({ err: err.message, id: d.id }, '[Farmacia] Recovery replay: fallo individual — continúa con siguiente'));
+      }
+    });
+
   } catch (err) {
     console.error('[Bootstrap] Error al conectar con la infraestructura:', err.message || err);
     if (process.env.NODE_ENV === 'production') {

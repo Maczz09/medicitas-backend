@@ -38,9 +38,9 @@ class MySQLAuthRepository {
     try {
       await conn.beginTransaction();
       await conn.query(
-        `INSERT INTO medicitas_users.usuarios (id_usuario, id_rol, nombre, apellido, email, password_hash)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [user.id, user.idRol, user.nombre, user.apellido, user.email, user.passwordHash]
+        `INSERT INTO medicitas_users.usuarios (id_usuario, id_rol, id_medico, nombre, apellido, email, password_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [user.id, user.idRol, user.idMedico || null, user.nombre, user.apellido, user.email, user.passwordHash]
       );
       await conn.query(
         `INSERT INTO medicitas_users.user_security (id_usuario) VALUES (?)`,
@@ -53,6 +53,32 @@ class MySQLAuthRepository {
     } finally {
       conn.release();
     }
+  }
+
+  async listUsuarios({ q, offset, limit }) {
+    const like = `%${q || ''}%`;
+    const whereSearch = q
+      ? `WHERE (u.nombre LIKE ? OR u.apellido LIKE ? OR u.email LIKE ? OR u.id_usuario LIKE ?)`
+      : '';
+    const searchParams = q ? [like, like, like, like] : [];
+
+    const [countRows] = await db.query(
+      `SELECT COUNT(*) AS total FROM medicitas_users.usuarios u ${whereSearch}`,
+      searchParams
+    );
+
+    const [rows] = await db.query(
+      `SELECT u.id_usuario, u.nombre, u.apellido, u.email, u.id_rol, r.nombre AS rolNombre,
+              u.id_medico, u.activo, u.created_at, u.updated_at
+       FROM medicitas_users.usuarios u
+       JOIN medicitas_users.roles r ON u.id_rol = r.id_rol
+       ${whereSearch}
+       ORDER BY u.created_at DESC
+       LIMIT ${parseInt(limit, 10)} OFFSET ${parseInt(offset, 10)}`,
+      searchParams
+    );
+
+    return { data: rows, total: countRows[0].total };
   }
 
   async incrementFailedAttempts(userId) {

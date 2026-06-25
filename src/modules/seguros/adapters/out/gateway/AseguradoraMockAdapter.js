@@ -60,6 +60,9 @@ class AseguradoraMockAdapter {
     };
   }
 
+  // No-op: el mock no tiene Circuit Breaker, no hay nada que recuperar
+  registrarRecuperacion(_fn) {}
+
   _simularLatencia(minMs, maxMs) {
     const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
     return new Promise(resolve => setTimeout(resolve, ms));

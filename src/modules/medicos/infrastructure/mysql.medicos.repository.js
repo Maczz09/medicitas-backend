@@ -11,6 +11,15 @@ class MySQLMedicosRepository {
     return rows[0] || null;
   }
 
+  async findAll() {
+    const [rows] = await db.query(
+      `SELECT id_medico, nombre, apellido, cmp, especialidad, activo
+       FROM svc_med.medicos WHERE activo = 1
+       ORDER BY apellido, nombre`
+    );
+    return rows;
+  }
+
   async create(medico) {
     await db.query(
       `INSERT INTO svc_med.medicos (id_medico, nombre, apellido, cmp, especialidad) VALUES (?, ?, ?, ?, ?)`,

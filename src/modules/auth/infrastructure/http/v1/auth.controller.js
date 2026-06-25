@@ -33,6 +33,16 @@ exports.register = async (req, res, next) => {
   }
 };
 
+exports.listUsuarios = async (req, res, next) => {
+  try {
+    const { q, page, limit } = req.query;
+    const result = await authUseCases.listUsuarios(q, page, limit);
+    res.status(200).json({ ...result, correlationId: req.correlationId });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.generateOTP = async (req, res, next) => {
   try {
     const { email } = req.body;

@@ -9,15 +9,15 @@ class TrazasMySQLRepository {
   async insertar(traza) {
     const conn = await this.pool.getConnection();
     try {
+      // Tabla real: svc_aud.trazas_auditoria
+      //   (id_traza, id_evento, tipo_evento, servicio_origen, correlation_id, payload, registrado_en)
       await conn.execute(
-        `INSERT INTO svc_aud.trazas
-         (id, id_evento, servicio_origen, tipo_evento, routing_key,
-          payload, correlation_id, timestamp_origen)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO svc_aud.trazas_auditoria
+         (id_traza, id_evento, tipo_evento, servicio_origen, correlation_id, payload)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [
-          traza.id, traza.idEvento, traza.servicioOrigen, traza.tipoEvento,
-          traza.routingKey, JSON.stringify(traza.payload),
-          traza.correlationId, traza.timestampOrigen,
+          traza.id, traza.idEvento, traza.tipoEvento, traza.servicioOrigen,
+          traza.correlationId, JSON.stringify(traza.payload),
         ]
       );
       return { insertada: true };
@@ -41,26 +41,28 @@ class TrazasMySQLRepository {
       if (servicio)      { condiciones.push('servicio_origen = ?'); params.push(servicio); }
       if (tipoEvento)    { condiciones.push('tipo_evento = ?');     params.push(tipoEvento); }
       if (correlationId) { condiciones.push('correlation_id = ?');  params.push(correlationId); }
-      if (desde)         { condiciones.push('recibido_en >= ?');    params.push(desde); }
-      if (hasta)         { condiciones.push('recibido_en <= ?');    params.push(hasta); }
+      if (desde)         { condiciones.push('registrado_en >= ?');  params.push(desde); }
+      if (hasta)         { condiciones.push('registrado_en <= ?');  params.push(hasta); }
 
       const whereClause = condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '';
-      const offset = (pagina - 1) * porPagina;
+      // LIMIT/OFFSET se interpolan como enteros: mysql2 .execute() rechaza placeholders aquí.
+      const limitN = parseInt(porPagina, 10) || 20;
+      const offsetN = (parseInt(pagina, 10) - 1) * limitN;
 
       // Total para la paginación
       const [totalRows] = await conn.execute(
-        `SELECT COUNT(*) AS total FROM svc_aud.trazas ${whereClause}`,
+        `SELECT COUNT(*) AS total FROM svc_aud.trazas_auditoria ${whereClause}`,
         params
       );
 
       // Resultados de la página (más recientes primero)
       const [rows] = await conn.execute(
-        `SELECT id, id_evento, servicio_origen, tipo_evento, routing_key,
-                payload, correlation_id, timestamp_origen, recibido_en
-         FROM svc_aud.trazas ${whereClause}
-         ORDER BY recibido_en DESC
-         LIMIT ? OFFSET ?`,
-        [...params, porPagina, offset]
+        `SELECT id_traza, id_evento, servicio_origen, tipo_evento,
+                payload, correlation_id, registrado_en
+         FROM svc_aud.trazas_auditoria ${whereClause}
+         ORDER BY registrado_en DESC
+         LIMIT ${limitN} OFFSET ${offsetN}`,
+        params
       );
 
       return {
@@ -78,11 +80,11 @@ class TrazasMySQLRepository {
     const conn = await this.pool.getConnection();
     try {
       const [rows] = await conn.execute(
-        `SELECT id, id_evento, servicio_origen, tipo_evento, routing_key,
-                payload, correlation_id, timestamp_origen, recibido_en
-         FROM svc_aud.trazas
+        `SELECT id_traza, id_evento, servicio_origen, tipo_evento,
+                payload, correlation_id, registrado_en
+         FROM svc_aud.trazas_auditoria
          WHERE correlation_id = ?
-         ORDER BY recibido_en ASC`,  // Cronológico — del primero al último
+         ORDER BY registrado_en ASC`,  // Cronológico — del primero al último
         [correlationId]
       );
       return rows.map(this._mapear);
@@ -94,17 +96,18 @@ class TrazasMySQLRepository {
   }
 
   _mapear(r) {
-    return new Traza({
-      id:              r.id,
+    const traza = new Traza({
+      id:              r.id_traza,
       idEvento:        r.id_evento,
       servicioOrigen:  r.servicio_origen,
       tipoEvento:      r.tipo_evento,
-      routingKey:      r.routing_key,
+      routingKey:      null,
       payload:         typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload,
       correlationId:   r.correlation_id,
-      timestampOrigen: r.timestamp_origen,
-      recibidoEn:      r.recibido_en,
+      timestampOrigen: null,
     });
+    traza.recibidoEn = r.registrado_en;
+    return traza;
   }
 }
 
