@@ -32,6 +32,15 @@ exports.create = async (req, res, next) => {
   }
 };
 
+exports.update = async (req, res, next) => {
+  try {
+    const result = await useCases.updatePaciente(req.params.id, req.body, req.correlationId);
+    res.status(200).json({ data: result, correlationId: req.correlationId });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.updateContact = async (req, res, next) => {
   try {
     await useCases.updateContacto(req.params.id, req.body, req.correlationId);

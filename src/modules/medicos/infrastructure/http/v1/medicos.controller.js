@@ -18,6 +18,24 @@ exports.getAll = async (req, res, next) => {
   }
 };
 
+exports.getById = async (req, res, next) => {
+  try {
+    const data = await medicosUseCases.getMedico(req.params.id);
+    res.status(200).json({ data, correlationId: req.correlationId });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.updateMedico = async (req, res, next) => {
+  try {
+    const data = await medicosUseCases.updateMedico(req.params.id, req.body);
+    res.status(200).json({ data, correlationId: req.correlationId });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.createMedico = async (req, res, next) => {
   try {
     const { cmp, nombre, apellido, especialidad, email, password } = req.body;

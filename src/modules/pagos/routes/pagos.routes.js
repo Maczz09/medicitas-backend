@@ -36,6 +36,40 @@ const controller = new PagosController({
 
 const router = Router();
 
+// ── Listado de pagos (admin/auditoría) — paginado ─────────────────────────────
+router.get('/', verifyToken, requireRole('RECEPCIONISTA', 'Auditor'), async (req, res, next) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+    const estado = req.query.estado;
+    const where = estado ? 'WHERE pg.estado = ?' : '';
+    const params = estado ? [estado] : [];
+
+    const [countRows] = await pool.query(`SELECT COUNT(*) AS total FROM svc_pag.pagos pg ${where}`, params);
+    const [rows] = await pool.query(
+      `SELECT pg.id_pago, pg.id_cita, pg.id_paciente, pg.codigo_autorizacion, pg.metodo_pago,
+              pg.monto_total, pg.monto_cobertura, pg.monto_copago, pg.estado, pg.tipo_comprobante,
+              pg.numero_comprobante, pg.created_at,
+              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre
+       FROM svc_pag.pagos pg
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = pg.id_paciente
+       ${where}
+       ORDER BY pg.created_at DESC
+       LIMIT ${limit} OFFSET ${offset}`,
+      params,
+    );
+
+    res.json({
+      data: rows,
+      meta: { total: countRows[0].total, page, limit, totalPages: Math.ceil(countRows[0].total / limit) },
+      correlationId: req.correlationId,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
  * @swagger
  * /api/v1/pagos:
@@ -75,7 +109,7 @@ const router = Router();
  *       400:
  *         description: Datos inválidos o error de dominio
  */
-router.post('/',              verifyToken, requireRole('RECEPCIONISTA'),          controller.confirmar);
+router.post('/',              verifyToken, requireRole('RECEPCIONISTA', 'Auditor'),          controller.confirmar);
 
 /**
  * @swagger
@@ -98,7 +132,7 @@ router.post('/',              verifyToken, requireRole('RECEPCIONISTA'),        
  *       404:
  *         description: Pago no encontrado
  */
-router.get('/:id',            verifyToken, requireRole(['RECEPCIONISTA','INTERNAL']), controller.consultar);
+router.get('/:id',            verifyToken, requireRole(['RECEPCIONISTA','INTERNAL','Auditor']), controller.consultar);
 
 /**
  * @swagger
@@ -121,7 +155,7 @@ router.get('/:id',            verifyToken, requireRole(['RECEPCIONISTA','INTERNA
  *       404:
  *         description: Pago no encontrado
  */
-router.get('/cita/:idCita',   verifyToken, requireRole(['RECEPCIONISTA','INTERNAL']), controller.consultarPorCita);
+router.get('/cita/:idCita',   verifyToken, requireRole(['RECEPCIONISTA','INTERNAL','Auditor']), controller.consultarPorCita);
 
 /**
  * @swagger
@@ -156,6 +190,6 @@ router.get('/cita/:idCita',   verifyToken, requireRole(['RECEPCIONISTA','INTERNA
  *       404:
  *         description: Pago no encontrado
  */
-router.post('/:id/reversar',  verifyToken, requireRole('RECEPCIONISTA'),          controller.reversar);
+router.post('/:id/reversar',  verifyToken, requireRole('RECEPCIONISTA', 'Auditor'),          controller.reversar);
 
 module.exports = router;

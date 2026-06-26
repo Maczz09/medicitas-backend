@@ -43,7 +43,7 @@ router.use(verifyToken);
  *     security:
  *       - bearerAuth: []
  */
-router.post('/expedientes', requireRole('Médico', 'Recepcionista'), async (req, res, next) => {
+router.post('/expedientes', requireRole('Médico', 'Recepcionista', 'Auditor'), async (req, res, next) => {
   try {
     const idPaciente = req.body.idPaciente || req.body.id_paciente;
     if (!idPaciente) {
@@ -166,6 +166,6 @@ router.get( '/:idPaciente/encuentros', requireRole('Médico', 'Auditor'), contro
  *       201:
  *         description: Encuentro clínico registrado con éxito
  */
-router.post('/:idPaciente/encuentros', requireRole('Médico'), controller.registrarEncuentro);
+router.post('/:idPaciente/encuentros', requireRole('Médico', 'Auditor'), controller.registrarEncuentro);
 
 module.exports = router;

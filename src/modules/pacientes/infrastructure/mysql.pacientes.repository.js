@@ -49,6 +49,32 @@ class MySQLPacientesRepository {
     );
   }
 
+  async findByIdAny(idPaciente, conn = defaultDb) {
+    const [rows] = await conn.query(
+      `SELECT * FROM svc_pac.pacientes WHERE id_paciente = ?`,
+      [idPaciente]
+    );
+    return rows[0] || null;
+  }
+
+  async update(idPaciente, fields, conn = defaultDb) {
+    const allowed = [
+      'nombre', 'apellido', 'tipo_documento', 'numero_documento',
+      'fecha_nacimiento', 'sexo', 'telefono', 'email', 'direccion',
+    ];
+    const sets = [];
+    const params = [];
+    for (const k of allowed) {
+      if (fields[k] !== undefined) {
+        sets.push(`${k} = ?`);
+        params.push(fields[k]);
+      }
+    }
+    if (sets.length === 0) return;
+    params.push(idPaciente);
+    await conn.query(`UPDATE svc_pac.pacientes SET ${sets.join(', ')} WHERE id_paciente = ?`, params);
+  }
+
   async updateContact(idPaciente, { telefono, email, direccion }, conn = defaultDb) {
     await conn.query(
       `UPDATE svc_pac.pacientes SET telefono = ?, email = ?, direccion = ? WHERE id_paciente = ?`,

@@ -25,6 +25,18 @@ class MySQLAuthRepository {
     return rows[0] || null;
   }
 
+  async findUsuarioByIdAny(id) {
+    const [rows] = await db.query(
+      `SELECT u.id_usuario, u.nombre, u.apellido, u.email, u.id_rol, u.id_medico, u.activo,
+              u.created_at, u.updated_at, r.nombre AS rolNombre
+       FROM medicitas_users.usuarios u
+       JOIN medicitas_users.roles r ON u.id_rol = r.id_rol
+       WHERE u.id_usuario = ?`,
+      [id]
+    );
+    return rows[0] || null;
+  }
+
   async findRoleByName(nombre) {
     const [rows] = await db.query(
       `SELECT * FROM medicitas_users.roles WHERE nombre = ?`,
@@ -156,6 +168,22 @@ class MySQLAuthRepository {
     await db.query(
       `UPDATE medicitas_users.usuarios SET id_rol = ? WHERE id_usuario = ?`,
       [idRol, userId]
+    );
+  }
+
+  async updateUsuario(id, { nombre, apellido, email, idRol, activo }) {
+    const fields = [];
+    const params = [];
+    if (nombre !== undefined)  { fields.push('nombre = ?');   params.push(nombre); }
+    if (apellido !== undefined){ fields.push('apellido = ?'); params.push(apellido); }
+    if (email !== undefined)   { fields.push('email = ?');    params.push(email); }
+    if (idRol !== undefined)   { fields.push('id_rol = ?');   params.push(idRol); }
+    if (activo !== undefined)  { fields.push('activo = ?');   params.push(activo ? 1 : 0); }
+    if (fields.length === 0) return;
+    params.push(id);
+    await db.query(
+      `UPDATE medicitas_users.usuarios SET ${fields.join(', ')} WHERE id_usuario = ?`,
+      params
     );
   }
 }

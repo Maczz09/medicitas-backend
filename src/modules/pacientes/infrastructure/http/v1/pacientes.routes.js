@@ -128,6 +128,7 @@ router.post('/', verifyToken, requireRole('Recepcionista', 'Auditor'), controlle
  *       200:
  *         description: Evento de actualización publicado
  */
+router.put('/:id', verifyToken, requireRole('Recepcionista', 'Auditor'), controller.update);
 router.put('/:id/contacto', verifyToken, requireRole('Recepcionista', 'Auditor'), controller.updateContact);
 
 /**

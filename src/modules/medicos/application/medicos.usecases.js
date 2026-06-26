@@ -22,6 +22,31 @@ class MedicosUseCases {
     return this.medicosRepository.findAll();
   }
 
+  async getMedico(idMedico) {
+    const medico = await this.medicosRepository.findByIdAny(idMedico);
+    if (!medico) throw new MedicoNotFoundError();
+    return medico;
+  }
+
+  async updateMedico(idMedico, dto) {
+    const medico = await this.medicosRepository.findByIdAny(idMedico);
+    if (!medico) throw new MedicoNotFoundError();
+
+    if (dto.cmp && dto.cmp !== medico.cmp) {
+      const existente = await this.medicosRepository.findByCmp(dto.cmp);
+      if (existente) throw new MedicoDuplicadoError();
+    }
+
+    await this.medicosRepository.update(idMedico, {
+      nombre: dto.nombre,
+      apellido: dto.apellido,
+      cmp: dto.cmp,
+      especialidad: dto.especialidad,
+      activo: dto.activo,
+    });
+    return this.medicosRepository.findByIdAny(idMedico);
+  }
+
   async getDisponibilidadBase(idMedico) {
     const medico = await this.medicosRepository.findById(idMedico);
     if (!medico) throw new MedicoNotFoundError();

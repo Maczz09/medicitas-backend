@@ -59,8 +59,12 @@ router.post('/', verifyToken, requireRole('Auditor'), controller.createMedico);
  *       200:
  *         description: Resultado de disponibilidad
  */
-router.get('/:id/disponibilidad', verifyToken, requireRole('Recepcionista', 'Médico'), controller.getDisponibilidad);
-router.post('/:id/horarios', verifyToken, requireRole('Médico'), controller.registrarHorarios);
-router.post('/:id/bloqueos', verifyToken, requireRole('Médico'), controller.registrarBloqueo);
+router.get('/:id/disponibilidad', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), controller.getDisponibilidad);
+router.post('/:id/horarios', verifyToken, requireRole('Médico', 'Auditor'), controller.registrarHorarios);
+router.post('/:id/bloqueos', verifyToken, requireRole('Médico', 'Auditor'), controller.registrarBloqueo);
+
+// CRUD completo de médicos (Auditor)
+router.get('/:id', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), controller.getById);
+router.put('/:id', verifyToken, requireRole('Auditor'), controller.updateMedico);
 
 module.exports = router;

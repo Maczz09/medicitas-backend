@@ -144,7 +144,18 @@ router.post('/register', verifyToken, requireRole('Auditor', 'Recepcionista'), c
  *     security:
  *       - bearerAuth: []
  */
-router.get('/usuarios', verifyToken, requireRole('Auditor'), controller.listUsuarios);
+router.get('/usuarios', verifyToken, requireRole('Auditor', 'Médico', 'Recepcionista'), controller.listUsuarios);
+
+/**
+ * @swagger
+ * /api/v1/auth/usuarios/{id}:
+ *   put:
+ *     summary: Editar un usuario (nombre, apellido, email, rol, activo) — Auditor/Recepcionista
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.put('/usuarios/:id', verifyToken, requireRole('Auditor'), controller.updateUsuario);
 
 /**
  * @swagger

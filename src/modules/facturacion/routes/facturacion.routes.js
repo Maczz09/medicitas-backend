@@ -34,7 +34,7 @@ const router = Router();
  *       404:
  *         description: Comprobante no encontrado
  */
-router.get('/pago/:idPago/comprobante', verifyToken, requireRole(['RECEPCIONISTA','INTERNAL']), controller.consultarPorPago);
+router.get('/pago/:idPago/comprobante', verifyToken, requireRole(['RECEPCIONISTA','INTERNAL','Auditor']), controller.consultarPorPago);
 
 /**
  * @swagger
@@ -56,7 +56,7 @@ router.get('/pago/:idPago/comprobante', verifyToken, requireRole(['RECEPCIONISTA
  *       404:
  *         description: Comprobante no encontrado
  */
-router.get('/comprobantes/:id', verifyToken, requireRole(['RECEPCIONISTA','INTERNAL']), controller.consultarPorId);
+router.get('/comprobantes/:id', verifyToken, requireRole(['RECEPCIONISTA','INTERNAL','Auditor']), controller.consultarPorId);
 
 /**
  * @swagger

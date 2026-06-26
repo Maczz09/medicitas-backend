@@ -20,6 +20,28 @@ class MySQLMedicosRepository {
     return rows;
   }
 
+  async findByIdAny(idMedico) {
+    const [rows] = await db.query(
+      `SELECT id_medico, nombre, apellido, cmp, especialidad, activo, created_at, updated_at
+       FROM svc_med.medicos WHERE id_medico = ?`,
+      [idMedico]
+    );
+    return rows[0] || null;
+  }
+
+  async update(idMedico, { nombre, apellido, cmp, especialidad, activo }) {
+    const fields = [];
+    const params = [];
+    if (nombre !== undefined)       { fields.push('nombre = ?');       params.push(nombre); }
+    if (apellido !== undefined)     { fields.push('apellido = ?');     params.push(apellido); }
+    if (cmp !== undefined)          { fields.push('cmp = ?');          params.push(cmp); }
+    if (especialidad !== undefined) { fields.push('especialidad = ?'); params.push(especialidad); }
+    if (activo !== undefined)       { fields.push('activo = ?');       params.push(activo ? 1 : 0); }
+    if (fields.length === 0) return;
+    params.push(idMedico);
+    await db.query(`UPDATE svc_med.medicos SET ${fields.join(', ')} WHERE id_medico = ?`, params);
+  }
+
   async create(medico) {
     await db.query(
       `INSERT INTO svc_med.medicos (id_medico, nombre, apellido, cmp, especialidad) VALUES (?, ?, ?, ?, ?)`,

@@ -125,6 +125,45 @@ class AuthUseCases {
     return { id, email, rol: rol.nombre, idMedico };
   }
 
+  async actualizarUsuario(id, dto) {
+    const user = await this.authRepository.findUsuarioByIdAny(id);
+    if (!user) throw new ResourceNotFoundError('Usuario no encontrado');
+
+    if (dto.email !== undefined) {
+      if (!EMAIL_REGEX.test(dto.email)) throw new AuthValidationError('Formato de correo inválido');
+      if (dto.email !== user.email) {
+        const existing = await this.authRepository.findUserByEmail(dto.email);
+        if (existing) throw new UserConflictError('El correo ya está registrado');
+      }
+    }
+
+    let idRol;
+    if (dto.rolNombre) {
+      const rol = await this.authRepository.findRoleByName(dto.rolNombre);
+      if (!rol) throw new ResourceNotFoundError(`El rol '${dto.rolNombre}' no existe`);
+      idRol = rol.id_rol;
+    }
+
+    await this.authRepository.updateUsuario(id, {
+      nombre: dto.nombre,
+      apellido: dto.apellido,
+      email: dto.email,
+      idRol,
+      activo: dto.activo,
+    });
+
+    const updated = await this.authRepository.findUsuarioByIdAny(id);
+    return {
+      id_usuario: updated.id_usuario,
+      nombre: updated.nombre,
+      apellido: updated.apellido,
+      email: updated.email,
+      rolNombre: updated.rolNombre,
+      id_medico: updated.id_medico,
+      activo: updated.activo,
+    };
+  }
+
   async listUsuarios(q, page = 1, limit = 10) {
     const p = Math.max(parseInt(page, 10) || 1, 1);
     const l = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);

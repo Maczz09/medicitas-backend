@@ -88,6 +88,40 @@ const router = express.Router();
 
 router.use(correlationMiddleware);
 
+// ── Listado de validaciones de cobertura (admin/auditoría) — paginado ──────────
+router.get('/', verifyToken, requireRole('Recepcionista', 'Auditor'), async (req, res, next) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+    const estado = req.query.estado;
+    const where = estado ? 'WHERE v.estado_cobertura = ?' : '';
+    const params = estado ? [estado] : [];
+
+    const [countRows] = await dbPool.query(`SELECT COUNT(*) AS total FROM svc_seg.validaciones_cobertura v ${where}`, params);
+    const [rows] = await dbPool.query(
+      `SELECT v.id, v.id_paciente, v.id_aseguradora, v.numero_poliza, v.tipo_consulta,
+              v.estado_cobertura, v.porcentaje_cobertura, v.codigo_autorizacion, v.vigencia,
+              v.es_fallback, v.correlation_id, v.created_at,
+              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre
+       FROM svc_seg.validaciones_cobertura v
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = v.id_paciente
+       ${where}
+       ORDER BY v.created_at DESC
+       LIMIT ${limit} OFFSET ${offset}`,
+      params,
+    );
+
+    res.json({
+      data: rows,
+      meta: { total: countRows[0].total, page, limit, totalPages: Math.ceil(countRows[0].total / limit) },
+      correlationId: req.correlationId,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
  * @swagger
  * tags:
@@ -135,7 +169,7 @@ router.use(correlationMiddleware);
  */
 router.post('/validar',
   verifyToken,
-  requireRole(['Recepcionista', 'INTERNAL']),
+  requireRole(['Recepcionista', 'Auditor', 'INTERNAL']),
   checkIdempotency,
   controller.validarCobertura
 );
@@ -163,7 +197,7 @@ router.post('/validar',
  */
 router.get('/:id',
   verifyToken,
-  requireRole(['Recepcionista', 'INTERNAL']),
+  requireRole(['Recepcionista', 'Auditor', 'INTERNAL']),
   controller.consultarValidacion
 );
 

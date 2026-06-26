@@ -43,6 +43,15 @@ exports.listUsuarios = async (req, res, next) => {
   }
 };
 
+exports.updateUsuario = async (req, res, next) => {
+  try {
+    const result = await authUseCases.actualizarUsuario(req.params.id, req.body);
+    res.status(200).json({ data: result, correlationId: req.correlationId });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.generateOTP = async (req, res, next) => {
   try {
     const { email } = req.body;

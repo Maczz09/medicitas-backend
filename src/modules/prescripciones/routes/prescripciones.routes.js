@@ -58,6 +58,39 @@ const controller = new PrescripcionesController({
 
 const router = express.Router();
 
+// ── Listado de despachos de receta (admin/auditoría) — paginado ────────────────
+router.get('/', verifyToken, requireRole('Médico', 'Recepcionista', 'Auditor'), async (req, res, next) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+    const estado = req.query.estado;
+    const where = estado ? 'WHERE d.estado = ?' : '';
+    const params = estado ? [estado] : [];
+
+    const [countRows] = await dbPool.query(`SELECT COUNT(*) AS total FROM svc_pre.despachos d ${where}`, params);
+    const [rows] = await dbPool.query(
+      `SELECT d.id, d.id_paciente, d.estado, d.contenido, d.referencia_farmacia, d.motivo_rechazo,
+              d.intentos_envio, d.correlation_id, d.fecha_emision, d.created_at,
+              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre
+       FROM svc_pre.despachos d
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = d.id_paciente
+       ${where}
+       ORDER BY d.created_at DESC
+       LIMIT ${limit} OFFSET ${offset}`,
+      params,
+    );
+
+    res.json({
+      data: rows,
+      meta: { total: countRows[0].total, page, limit, totalPages: Math.ceil(countRows[0].total / limit) },
+      correlationId: req.correlationId,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
  * @swagger
  * tags:
@@ -88,7 +121,7 @@ const router = express.Router();
  */
 router.get('/:id',
   verifyToken,
-  requireRole(['Médico', 'Recepcionista']),
+  requireRole(['Médico', 'Recepcionista', 'Auditor']),
   controller.getReceta.bind(controller)
 );
 
@@ -114,7 +147,7 @@ router.get('/:id',
  */
 router.post('/:id/reintentar',
   verifyToken,
-  requireRole(['Médico', 'Recepcionista']),
+  requireRole(['Médico', 'Recepcionista', 'Auditor']),
   checkIdempotency,
   controller.reintentarEnvio.bind(controller)
 );
@@ -141,7 +174,7 @@ router.post('/:id/reintentar',
  */
 router.patch('/:id/retirada',
   verifyToken,
-  requireRole(['Recepcionista']),
+  requireRole(['Recepcionista', 'Auditor']),
   checkIdempotency,
   controller.marcarRetirada.bind(controller)
 );

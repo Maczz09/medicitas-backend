@@ -98,6 +98,39 @@ class PacientesUseCases {
     };
   }
 
+  async updatePaciente(idPaciente, dto, correlationId) {
+    if (dto.tipo_documento && dto.numero_documento) {
+      this._validarDocumento(dto.tipo_documento, dto.numero_documento);
+    }
+    if (dto.fecha_nacimiento) this._validarFechaNacimiento(dto.fecha_nacimiento);
+
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const existing = await this.pacientesRepository.findByIdAny(idPaciente, conn);
+      if (!existing) throw new PacienteNotFoundError();
+
+      await this.pacientesRepository.update(idPaciente, dto, conn);
+
+      await publicarEventoOutbox(conn, 'svc_pac', {
+        idEvento: uuidv4(),
+        tipoEvento: 'PacienteActualizado',
+        payload: { id_paciente: idPaciente, ...dto },
+        correlationId,
+      });
+
+      await conn.commit();
+      return this.pacientesRepository.findByIdAny(idPaciente);
+    } catch (err) {
+      await conn.rollback();
+      if (err.code === 'ER_DUP_ENTRY') throw new PacienteDuplicadoError();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  }
+
   async updateContacto(idPaciente, { telefono, email, direccion }, correlationId) {
     const conn = await db.getConnection();
     try {

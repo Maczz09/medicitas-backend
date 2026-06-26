@@ -83,6 +83,41 @@ const router = express.Router();
 
 router.use(correlationMiddleware);
 
+// ── Listado de citas (admin/auditoría) — paginado + filtro por estado ──────────
+router.get('/', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), async (req, res, next) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+    const estado = req.query.estado;
+    const where = estado ? 'WHERE c.estado = ?' : '';
+    const params = estado ? [estado] : [];
+
+    const [countRows] = await dbPool.query(`SELECT COUNT(*) AS total FROM svc_cit.citas c ${where}`, params);
+    const [rows] = await dbPool.query(
+      `SELECT c.id, c.id_paciente, c.id_medico, c.fecha_hora, c.especialidad, c.estado,
+              c.correlation_id, c.created_at,
+              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
+              CONCAT(m.nombre, ' ', m.apellido) AS medico_nombre
+       FROM svc_cit.citas c
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = c.id_paciente
+       LEFT JOIN svc_med.medicos m ON m.id_medico = c.id_medico
+       ${where}
+       ORDER BY c.fecha_hora DESC
+       LIMIT ${limit} OFFSET ${offset}`,
+      params,
+    );
+
+    res.json({
+      data: rows,
+      meta: { total: countRows[0].total, page, limit, totalPages: Math.ceil(countRows[0].total / limit) },
+      correlationId: req.correlationId,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
  * @swagger
  * tags:
@@ -133,7 +168,7 @@ router.use(correlationMiddleware);
  */
 router.post('/',
   verifyToken,
-  requireRole(['Recepcionista']),
+  requireRole(['Recepcionista', 'Auditor']),
   checkIdempotency,
   controller.reservarCita
 );
@@ -163,7 +198,7 @@ router.post('/',
  */
 router.get('/:id',
   verifyToken,
-  requireRole(['Recepcionista', 'Médico', 'INTERNAL']),
+  requireRole(['Recepcionista', 'Médico', 'Auditor', 'INTERNAL']),
   controller.consultarCita
 );
 
@@ -202,7 +237,7 @@ router.get('/:id',
  */
 router.patch('/:id/cancelar',
   verifyToken,
-  requireRole(['Recepcionista']),
+  requireRole(['Recepcionista', 'Auditor']),
   controller.cancelarCita
 );
 
@@ -247,7 +282,7 @@ router.patch('/:id/cancelar',
  */
 router.patch('/:id/reprogramar',
   verifyToken,
-  requireRole(['Recepcionista']),
+  requireRole(['Recepcionista', 'Auditor']),
   controller.reprogramarCita
 );
 
@@ -278,7 +313,7 @@ router.patch('/:id/reprogramar',
  */
 router.post('/:id/ingreso',
   verifyToken,
-  requireRole(['Recepcionista']),
+  requireRole(['Recepcionista', 'Auditor']),
   controller.registrarIngreso
 );
 
@@ -310,7 +345,7 @@ router.post('/:id/ingreso',
  */
 router.patch('/:id/completar',
   verifyToken,
-  requireRole(['INTERNAL']),
+  requireRole(['INTERNAL', 'Auditor']),
   controller.completarCita
 );
 
