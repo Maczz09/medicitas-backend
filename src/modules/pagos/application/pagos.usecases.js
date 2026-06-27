@@ -60,6 +60,10 @@ class PagosUseCases {
         },
         correlationId
       });
+      
+      const { pagosCompletadosCounter, pagosMontoTotal } = require('../../../config/metrics');
+      pagosCompletadosCounter.inc({ metodo_pago: datosPago.metodo_pago });
+      pagosMontoTotal.inc({ metodo_pago: datosPago.metodo_pago }, datosPago.monto_total);
 
       await conn.commit();
       return pago;

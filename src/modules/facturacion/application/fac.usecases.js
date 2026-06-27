@@ -42,6 +42,9 @@ class FacUseCases {
         payload: comprobante,
         correlationId
       });
+      
+      const { comprobantesEmitidosCounter } = require('../../../config/metrics');
+      comprobantesEmitidosCounter.inc();
 
       await conn.commit();
       return comprobante;

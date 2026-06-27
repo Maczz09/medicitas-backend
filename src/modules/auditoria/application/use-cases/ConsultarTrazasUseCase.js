@@ -61,6 +61,7 @@ class ConsultarTrazasUseCase {
       correlationId:   traza.correlationId,
       timestampOrigen: traza.timestampOrigen,
       recibidoEn:      traza.recibidoEn,
+      actor:           traza.actor || null,
     };
   }
 }

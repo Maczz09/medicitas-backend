@@ -48,6 +48,9 @@ class PreUseCases {
         },
         correlationId
       });
+      
+      const { prescripcionesDespachadasCounter } = require('../../../config/metrics');
+      prescripcionesDespachadasCounter.inc();
 
       await conn.commit();
       return { prescripcion, id_receta: idReceta };

@@ -53,9 +53,28 @@ async function publishEvent(tipoEvento, payload, correlationId, idEvento, origen
   const routingKey = `event.${tipoEvento}`;
   const id = idEvento || require('uuid').v4();
 
-  // Los consumidores esperan un sobre { evento, idEvento, origen, payload, correlationId },
-  // no solo el payload. Sin esto, todos descartan el mensaje (Auditoría exige `origen`).
-  const sobre = { evento: tipoEvento, idEvento: id, origen: origen || 'desconocido', payload, correlationId };
+  // El payload puede venir como string (de la tabla outbox) o como objeto.
+  // Si viene como string, lo parseamos para poder extraer _actor.
+  let parsedPayload;
+  try {
+    parsedPayload = typeof payload === 'string' ? JSON.parse(payload) : (payload || {});
+  } catch {
+    parsedPayload = {};
+  }
+
+  // Extraemos _actor y _timestamp del payload y los subimos al nivel del sobre para que
+  // Auditoría los capture sin contaminar el payload de dominio.
+  const { _actor, _timestamp, ...cleanPayload } = parsedPayload;
+
+  const sobre = {
+    evento:        tipoEvento,
+    idEvento:      id,
+    origen:        origen || 'desconocido',
+    payload:       cleanPayload,
+    correlationId,
+    timestamp:     _timestamp || new Date().toISOString(),
+    actor:         _actor || null,
+  };
   const message = Buffer.from(JSON.stringify(sobre));
 
   channel.publish('medicitas.events', routingKey, message, {

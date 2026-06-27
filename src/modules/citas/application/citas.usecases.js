@@ -3,6 +3,7 @@ const { MedicoNoDisponibleError, CitaNoEncontradaError, CitaInvalidaError } = re
 const { publicarEventoOutbox } = require('../../../shared/infrastructure/outbox');
 const db = require('../../../config/database');
 const { client: redis } = require('../../../config/redis');
+const { citasCreadasCounter } = require('../../../config/metrics');
 
 class CitasUseCases {
   constructor(citasRepository) {
@@ -36,6 +37,8 @@ class CitasUseCases {
       };
 
       await this.citasRepository.create(nuevaCita, conn);
+
+      citasCreadasCounter.inc();
 
       await publicarEventoOutbox(conn, 'svc_cit', {
         idEvento: uuidv4(),

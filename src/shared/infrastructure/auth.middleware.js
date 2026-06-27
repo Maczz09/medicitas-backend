@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { UnauthorizedError } = require('../domain/errors');
+const asyncContext = require('../logger/asyncContext');
 
 function verifyToken(req, res, next) {
   const header = req.headers['authorization'];
@@ -9,8 +10,6 @@ function verifyToken(req, res, next) {
 
   const token = header.split(' ')[1];
 
-  // Interceptar llamadas internas con el token estático
-  console.log('DEBUG AUTH:', { token, envToken: process.env.INTERNAL_SERVICE_TOKEN });
   if (process.env.INTERNAL_SERVICE_TOKEN && token === process.env.INTERNAL_SERVICE_TOKEN.trim()) {
     req.user = { sub: 'internal_service', rolNombre: 'INTERNAL' };
     return next();
@@ -18,6 +17,16 @@ function verifyToken(req, res, next) {
 
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Inyectamos la identidad del actor en el contexto async (ya creado por correlationMiddleware)
+    // para que publicarEventoOutbox pueda leerla sin recibirla como parámetro explícito.
+    const store = asyncContext.getStore();
+    if (store && req.user) {
+      store.set('actorId',     req.user.sub      || req.user.idUsuario || null);
+      store.set('actorNombre', req.user.nombre   || req.user.email    || null);
+      store.set('actorRol',    req.user.rolNombre                     || null);
+    }
+
     next();
   } catch {
     return next(new UnauthorizedError('Token expirado o inválido'));

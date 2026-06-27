@@ -1,0 +1,46 @@
+groups:
+  - name: medicitas-operativo
+    rules:
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2.0
+        for: 2m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: "Latencia alta detectada (p95 > 2s)"
+          impact: "Los pacientes están experimentando demoras al navegar o pagar. Conversión en riesgo."
+          runbook: "Revisar logs en Loki filtrando por durationMs > 2000. Escalar el número de workers si el CPU está saturado."
+
+      - alert: HighErrorRate
+        expr: sum(rate(http_request_errors_total[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: "Tasa de error superior al 5%"
+          impact: "Pérdida de transacciones o agendamiento fallido. Impacto directo a ingresos."
+          runbook: "Revisar Loki buscando errorCode != null. Validar si la base de datos está rechazando conexiones."
+
+      - alert: CircuitBreakerOpen
+        expr: medicitas_circuit_breaker_state == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: integracion
+        annotations:
+          summary: "Circuit Breaker Abierto para {{ $labels.service }}"
+          impact: "Servicio degradado. Fallback activo. Posible pérdida de consistencia con externos."
+          runbook: "El servicio externo está fallando. Validar portal del proveedor (Aseguradora/Farmacia). No reiniciar el backend, el sistema se recuperará solo (Half-Open)."
+
+      - alert: OutboxSaturation
+        expr: medicitas_outbox_pending_messages > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: workers
+        annotations:
+          summary: "Saturación en el patrón Outbox"
+          impact: "Retraso en el envío de correos, facturas asíncronas y sincronización entre microservicios."
+          runbook: "Revisar estado de RabbitMQ. Verificar si el OutboxWorker está caído o produciendo errores en Loki."

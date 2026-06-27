@@ -39,9 +39,9 @@ CREATE TABLE IF NOT EXISTS usuarios (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO usuarios (id_usuario, id_rol, nombre, apellido, email, password_hash) VALUES
-  ('usr-rec-001', 1, 'Ana', 'García', 'recepcion@medicitas.pe', '$2b$12$EIXv3sNMF/xK3h3WuEcBpOY3k5LM7yQOzDqBdJtO5wUEe7fCqZ0Hy'),
-  ('usr-med-001', 2, 'Dr. Luis', 'Torres', 'medico@medicitas.pe', '$2b$12$EIXv3sNMF/xK3h3WuEcBpOY3k5LM7yQOzDqBdJtO5wUEe7fCqZ0Hy'),
-  ('usr-aud-001', 3, 'Carlos', 'Mendoza', 'auditor@medicitas.pe', '$2b$12$EIXv3sNMF/xK3h3WuEcBpOY3k5LM7yQOzDqBdJtO5wUEe7fCqZ0Hy');
+  ('usr-rec-001', 1, 'Ana', 'García', 'recepcion@medicitas.pe', '$2b$12$w5H/0SA6BwsSQSqtuQHK4O/e89jQYx4g.5kmUj6fpJdja5n7kPOMe'),
+  ('usr-med-001', 2, 'Dr. Luis', 'Torres', 'medico@medicitas.pe', '$2b$12$w5H/0SA6BwsSQSqtuQHK4O/e89jQYx4g.5kmUj6fpJdja5n7kPOMe'),
+  ('usr-aud-001', 3, 'Carlos', 'Mendoza', 'auditor@medicitas.pe', '$2b$12$w5H/0SA6BwsSQSqtuQHK4O/e89jQYx4g.5kmUj6fpJdja5n7kPOMe');
 
 CREATE TABLE IF NOT EXISTS user_security (
   id_usuario    VARCHAR(36)   NOT NULL,
@@ -78,6 +78,19 @@ CREATE TABLE IF NOT EXISTS peticiones_idempotentes (
   status_code     INT,
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (idempotency_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS outbox (
+  id_evento     VARCHAR(36)  NOT NULL,
+  tipo_evento   VARCHAR(100) NOT NULL,
+  payload       JSON         NOT NULL,
+  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  intentos      INT          NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(36) NOT NULL,
+  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  publicado_en  TIMESTAMP    NULL,
+  error_msg     TEXT,
+  PRIMARY KEY (id_evento)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ═══════════════════════════════════════════════════════════
@@ -404,15 +417,21 @@ CREATE DATABASE IF NOT EXISTS svc_aud CHARACTER SET utf8mb4 COLLATE utf8mb4_unic
 USE svc_aud;
 
 CREATE TABLE IF NOT EXISTS trazas_auditoria (
-  id_traza      VARCHAR(36)   NOT NULL DEFAULT (UUID()),
-  id_evento     VARCHAR(36)   NOT NULL,
-  tipo_evento   VARCHAR(100)  NOT NULL,
-  servicio_origen VARCHAR(100) NOT NULL,
-  correlation_id VARCHAR(36)  NOT NULL,
-  payload       JSON          NOT NULL,
-  registrado_en TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id_traza          VARCHAR(36)   NOT NULL DEFAULT (UUID()),
+  id_evento         VARCHAR(36)   NOT NULL,
+  tipo_evento       VARCHAR(100)  NOT NULL,
+  servicio_origen   VARCHAR(100)  NOT NULL,
+  correlation_id    VARCHAR(36)   NULL,
+  payload           JSON          NOT NULL,
+  timestamp_origen  DATETIME(3)   NULL COMMENT 'Momento real del evento (extraído del sobre RabbitMQ)',
+  registrado_en     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actor_id          VARCHAR(36)   NULL,
+  actor_nombre      VARCHAR(150)  NULL,
+  actor_rol         VARCHAR(50)   NULL,
   PRIMARY KEY (id_traza),
-  UNIQUE KEY uq_evento (id_evento)
+  UNIQUE KEY uq_evento (id_evento),
+  KEY idx_correlation (correlation_id),
+  KEY idx_actor (actor_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS eventos_procesados (

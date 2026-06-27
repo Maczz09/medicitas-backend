@@ -34,6 +34,12 @@ class SegurosUseCases {
       await conn.beginTransaction();
 
       await this.segurosRepository.guardarValidacion(validacion, conn);
+      
+      const { segurosValidadosCounter } = require('../../../config/metrics');
+      segurosValidadosCounter.inc({ 
+        estado: respuestaExterna.aprobado ? 'aprobado' : 'rechazado', 
+        aseguradora: datosValidacion.id_aseguradora 
+      });
 
       await publicarEventoOutbox(conn, 'svc_seg', {
         idEvento: uuidv4(),

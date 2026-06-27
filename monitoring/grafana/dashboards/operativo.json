@@ -1,0 +1,83 @@
+{
+  "title": "SRE: Diagnóstico Operativo y Negocio",
+  "tags": ["sre", "operaciones", "negocio"],
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Estado de Circuit Breaker (Resiliencia)",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 5 },
+      "targets": [
+        {
+          "expr": "medicitas_circuit_breaker_state",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Cerrado", "color": "green" }, "1": { "text": "Abierto", "color": "red" }, "2": { "text": "Medio-Abierto", "color": "orange" } } }
+          ]
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Pagos Procesados (Negocio)",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 5 },
+      "targets": [
+        {
+          "expr": "sum(medicitas_pagos_procesados_monto_total)",
+          "legendFormat": "Monto Total (S/)"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Saturación de Outbox (Saturación)",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 5 },
+      "targets": [
+        {
+          "expr": "medicitas_outbox_pending_messages",
+          "legendFormat": "Mensajes Pendientes"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tasa de Error HTTP (Errores)",
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_request_errors_total[5m])) by (method, route)",
+          "legendFormat": "{{method}} {{route}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latencia HTTP p95 (Duración)",
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Buscador de Trazas (Soporte)",
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{app=\"medicitas-backend\"} |= \"\"",
+          "queryType": "range"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "refresh": "10s"
+}

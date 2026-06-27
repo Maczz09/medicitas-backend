@@ -22,9 +22,12 @@ function errorHandler(err, req, res, next) {
     status = 500;
   }
 
+  const meta = (err instanceof DomainError && err.meta) ? err.meta : undefined;
+
   return res.status(status).json({
     codigo,
     mensaje,
+    ...(meta && { meta }),
     correlationId: req.correlationId
   });
 }

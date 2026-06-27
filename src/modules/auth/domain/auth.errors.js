@@ -7,8 +7,25 @@ class AuthValidationError extends DomainError {
 }
 
 class AccountLockedError extends DomainError {
-  constructor() {
+  constructor(unlockAt) {
     super('ACCOUNT_LOCKED', 'Cuenta bloqueada temporalmente por múltiples intentos fallidos', 401);
+    this.meta = unlockAt ? { unlockAt: new Date(unlockAt).toISOString() } : null;
+  }
+}
+
+class UserNotFoundError extends DomainError {
+  constructor() {
+    super('USER_NOT_FOUND', 'No existe ninguna cuenta con ese correo electrónico', 401);
+  }
+}
+
+class WrongPasswordError extends DomainError {
+  constructor(remaining) {
+    const msg = remaining === 1
+      ? `Contraseña incorrecta. ¡Cuidado! Solo te queda 1 intento antes del bloqueo`
+      : `Contraseña incorrecta. Te quedan ${remaining} intentos`;
+    super('WRONG_PASSWORD', msg, 401);
+    this.meta = { remaining };
   }
 }
 
@@ -45,6 +62,8 @@ class InvalidTokenError extends DomainError {
 module.exports = {
   AuthValidationError,
   AccountLockedError,
+  UserNotFoundError,
+  WrongPasswordError,
   InvalidCredentialsError,
   ResourceNotFoundError,
   UserConflictError,

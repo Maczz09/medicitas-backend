@@ -5,6 +5,8 @@ const { v4: uuidv4 } = require('uuid');
 const {
   AuthValidationError,
   AccountLockedError,
+  UserNotFoundError,
+  WrongPasswordError,
   InvalidCredentialsError,
   ResourceNotFoundError,
   UserConflictError,
@@ -12,6 +14,9 @@ const {
   InvalidTokenError
 } = require('../domain/auth.errors');
 const mailerService = require('../../../shared/infrastructure/mailer');
+const { publicarEventoOutbox } = require('../../../shared/infrastructure/outbox');
+const asyncContext = require('../../../shared/logger/asyncContext');
+const db = require('../../../config/database');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
@@ -47,14 +52,32 @@ class AuthUseCases {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
+  _correlationId() {
+    return asyncContext.getStore()?.get('correlationId') || uuidv4();
+  }
+
+  async _emit(tipoEvento, payload) {
+    const conn = await db.getConnection();
+    try {
+      await publicarEventoOutbox(conn, 'medicitas_users', {
+        idEvento: uuidv4(),
+        tipoEvento,
+        payload,
+        correlationId: this._correlationId(),
+      });
+    } finally {
+      conn.release();
+    }
+  }
+
   async login(email, password) {
     if (!EMAIL_REGEX.test(email)) throw new AuthValidationError('Formato de correo inválido');
 
     const user = await this.authRepository.findUserByEmail(email);
-    if (!user) throw new InvalidCredentialsError();
+    if (!user) throw new UserNotFoundError();
 
     if (user.locked_until && new Date() < new Date(user.locked_until)) {
-      throw new AccountLockedError();
+      throw new AccountLockedError(user.locked_until);
     }
 
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
@@ -64,9 +87,10 @@ class AuthUseCases {
       if (attempts >= MAX_FAILED_ATTEMPTS) {
         const lockUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60000);
         await this.authRepository.lockAccount(user.id_usuario, lockUntil);
-        throw new AccountLockedError();
+        throw new AccountLockedError(lockUntil);
       }
-      throw new InvalidCredentialsError();
+      const remaining = MAX_FAILED_ATTEMPTS - attempts;
+      throw new WrongPasswordError(remaining);
     }
 
     await this.authRepository.resetFailedAttempts(user.id_usuario);
@@ -76,6 +100,12 @@ class AuthUseCases {
     const refreshExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 días
 
     await this.authRepository.saveRefreshToken(user.id_usuario, refreshToken, refreshExpires);
+
+    this._emit('UsuarioLoggedIn', {
+      idUsuario: user.id_usuario,
+      email: user.email,
+      rol: user.rolNombre,
+    }).catch((err) => console.warn('[Auth] Error publicando UsuarioLoggedIn:', err.message));
 
     return { accessToken, refreshToken, rol: user.rolNombre };
   }
@@ -122,6 +152,9 @@ class AuthUseCases {
       passwordHash
     });
 
+    this._emit('UsuarioRegistrado', { id, email, rol: rolNombre, nombre, apellido })
+      .catch((err) => console.warn('[Auth] Error publicando UsuarioRegistrado:', err.message));
+
     return { id, email, rol: rol.nombre, idMedico };
   }
 
@@ -153,6 +186,16 @@ class AuthUseCases {
     });
 
     const updated = await this.authRepository.findUsuarioByIdAny(id);
+
+    this._emit('UsuarioActualizado', {
+      idUsuario: updated.id_usuario,
+      nombre: updated.nombre,
+      apellido: updated.apellido,
+      email: updated.email,
+      rolNombre: updated.rolNombre,
+      activo: updated.activo,
+    }).catch((err) => console.warn('[Auth] Error publicando UsuarioActualizado:', err.message));
+
     return {
       id_usuario: updated.id_usuario,
       nombre: updated.nombre,
@@ -206,6 +249,9 @@ class AuthUseCases {
     const passwordHash = await bcrypt.hash(newPassword, 12);
     await this.authRepository.updatePassword(user.id_usuario, passwordHash);
     await this.authRepository.resetFailedAttempts(user.id_usuario);
+
+    this._emit('PasswordCambiado', { email: user.email, idUsuario: user.id_usuario })
+      .catch((err) => console.warn('[Auth] Error publicando PasswordCambiado:', err.message));
   }
 
   async assignRole(idUsuario, rolNombre) {
@@ -216,6 +262,10 @@ class AuthUseCases {
     if (!rol) throw new ResourceNotFoundError('Rol no válido');
 
     await this.authRepository.assignRole(user.id_usuario, rol.id_rol);
+
+    this._emit('RolAsignado', { idUsuario, rolNombre, email: user.email })
+      .catch((err) => console.warn('[Auth] Error publicando RolAsignado:', err.message));
+
     return { id: idUsuario, nuevoRol: rolNombre };
   }
 }

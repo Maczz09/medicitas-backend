@@ -1,10 +1,30 @@
 const { v4: uuidv4 } = require('uuid');
 const { MedicoNotFoundError, MedicoDuplicadoError } = require('../domain/medico.errors');
 const db = require('../../../config/database');
+const { publicarEventoOutbox } = require('../../../shared/infrastructure/outbox');
+const asyncContext = require('../../../shared/logger/asyncContext');
 
 class MedicosUseCases {
   constructor(medicosRepository) {
     this.medicosRepository = medicosRepository;
+  }
+
+  _correlationId() {
+    return asyncContext.getStore()?.get('correlationId') || uuidv4();
+  }
+
+  async _emit(tipoEvento, payload) {
+    const conn = await db.getConnection();
+    try {
+      await publicarEventoOutbox(conn, 'svc_med', {
+        idEvento: uuidv4(),
+        tipoEvento,
+        payload,
+        correlationId: this._correlationId(),
+      });
+    } finally {
+      conn.release();
+    }
   }
 
   async createMedico(medicoDto) {
@@ -15,6 +35,8 @@ class MedicosUseCases {
     const nuevoMedico = { ...medicoDto, id_medico: idMedico };
 
     await this.medicosRepository.create(nuevoMedico);
+    await this._emit('MedicoCreado', nuevoMedico)
+      .catch((err) => console.warn('[Médicos] Error publicando MedicoCreado:', err.message));
     return nuevoMedico;
   }
 
@@ -44,7 +66,10 @@ class MedicosUseCases {
       especialidad: dto.especialidad,
       activo: dto.activo,
     });
-    return this.medicosRepository.findByIdAny(idMedico);
+    const updated = await this.medicosRepository.findByIdAny(idMedico);
+    await this._emit('MedicoActualizado', updated)
+      .catch((err) => console.warn('[Médicos] Error publicando MedicoActualizado:', err.message));
+    return updated;
   }
 
   async getDisponibilidadBase(idMedico) {
@@ -62,6 +87,8 @@ class MedicosUseCases {
     if (!medico) throw new MedicoNotFoundError();
 
     await this.medicosRepository.saveHorarios(idMedico, horarios);
+    await this._emit('HorariosActualizados', { idMedico, horarios })
+      .catch((err) => console.warn('[Médicos] Error publicando HorariosActualizados:', err.message));
   }
 
   async registrarBloqueo(idMedico, bloqueoDto) {
@@ -70,6 +97,8 @@ class MedicosUseCases {
 
     const idBloqueo = uuidv4();
     await this.medicosRepository.saveBloqueo({ ...bloqueoDto, id_medico: idMedico, id_bloqueo: idBloqueo });
+    await this._emit('BloqueoRegistrado', { idMedico, idBloqueo, ...bloqueoDto })
+      .catch((err) => console.warn('[Médicos] Error publicando BloqueoRegistrado:', err.message));
     return { id_bloqueo: idBloqueo };
   }
 }

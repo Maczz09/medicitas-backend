@@ -12,21 +12,18 @@ class ReconstruirCorrelacionUseCase {
 
     const trazas = await this.trazasRepo.buscarPorCorrelationId(correlationId);
 
-    if (trazas.length === 0) {
-      throw new DomainError('CORRELACION_NO_ENCONTRADA', 404,
-        `No se encontraron trazas para correlationId ${correlationId}`);
-    }
-
-    return {
-      correlationId,
-      totalEventos: trazas.length,
-      linea_tiempo: trazas.map(t => ({
-        servicioOrigen: t.servicioOrigen,
-        tipoEvento:     t.tipoEvento,
-        recibidoEn:     t.recibidoEn,
-        payload:        t.payload,
-      })),
-    };
+    // Devuelve array vacío si no hay coincidencias (el frontend lo gestiona correctamente)
+    return trazas.map(t => ({
+      id:              t.id,
+      idEvento:        t.idEvento,
+      servicioOrigen:  t.servicioOrigen,
+      tipoEvento:      t.tipoEvento,
+      routingKey:      t.routingKey,
+      payload:         t.payload,
+      correlationId:   t.correlationId,
+      timestampOrigen: t.timestampOrigen,
+      recibidoEn:      t.recibidoEn,
+    }));
   }
 }
 

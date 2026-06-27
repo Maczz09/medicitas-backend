@@ -62,6 +62,9 @@ class HclUseCases {
         payload: encuentro,
         correlationId
       });
+      
+      const { encuentrosHclCounter } = require('../../../config/metrics');
+      encuentrosHclCounter.inc();
 
       await conn.commit();
       return encuentro;

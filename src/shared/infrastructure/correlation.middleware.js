@@ -1,9 +1,14 @@
 const { v4: uuidv4 } = require('uuid');
+const asyncContext = require('../logger/asyncContext');
 
 function correlationMiddleware(req, res, next) {
-  req.correlationId = req.headers['x-correlation-id'] || uuidv4();
-  res.setHeader('X-Correlation-Id', req.correlationId);
-  next();
+  const correlationId = req.headers['x-correlation-id'] || uuidv4();
+  req.correlationId = correlationId;
+  res.setHeader('X-Correlation-Id', correlationId);
+  
+  asyncContext.run(new Map([['correlationId', correlationId]]), () => {
+    next();
+  });
 }
 
 module.exports = { correlationMiddleware };

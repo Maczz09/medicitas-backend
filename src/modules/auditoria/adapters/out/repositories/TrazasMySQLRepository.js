@@ -1,3 +1,4 @@
+const { v4: uuidv4 } = require('uuid');
 const { Traza } = require('../../../domain/entities/Traza');
 const { DomainError } = require('../../../../../shared/domain/errors');
 
@@ -9,17 +10,36 @@ class TrazasMySQLRepository {
   async insertar(traza) {
     const conn = await this.pool.getConnection();
     try {
-      // Tabla real: svc_aud.trazas_auditoria
-      //   (id_traza, id_evento, tipo_evento, servicio_origen, correlation_id, payload, registrado_en)
-      await conn.execute(
-        `INSERT INTO svc_aud.trazas_auditoria
-         (id_traza, id_evento, tipo_evento, servicio_origen, correlation_id, payload)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          traza.id, traza.idEvento, traza.tipoEvento, traza.servicioOrigen,
-          traza.correlationId, JSON.stringify(traza.payload),
-        ]
-      );
+      // correlationId puede ser null en eventos internos — nunca fallar por eso
+      const corrId = traza.correlationId || null;
+      const tsOrigen = traza.timestampOrigen
+        ? new Date(traza.timestampOrigen)
+        : null;
+      try {
+        await conn.execute(
+          `INSERT INTO svc_aud.trazas_auditoria
+           (id_traza, id_evento, tipo_evento, servicio_origen, correlation_id,
+            payload, timestamp_origen, actor_id, actor_nombre, actor_rol)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            traza.id, traza.idEvento, traza.tipoEvento, traza.servicioOrigen,
+            corrId, JSON.stringify(traza.payload), tsOrigen,
+            traza.actor?.id     || null,
+            traza.actor?.nombre || null,
+            traza.actor?.rol    || null,
+          ]
+        );
+      } catch (inner) {
+        if (inner.code !== 'ER_BAD_FIELD_ERROR') throw inner;
+        // Columnas nuevas no existen aún (migración pendiente) — insertar sin ellas
+        await conn.execute(
+          `INSERT INTO svc_aud.trazas_auditoria
+           (id_traza, id_evento, tipo_evento, servicio_origen, correlation_id, payload)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [traza.id, traza.idEvento, traza.tipoEvento, traza.servicioOrigen,
+           corrId, JSON.stringify(traza.payload)]
+        );
+      }
       return { insertada: true };
     } catch (err) {
       if (err.code === 'ER_DUP_ENTRY') {
@@ -56,14 +76,28 @@ class TrazasMySQLRepository {
       );
 
       // Resultados de la página (más recientes primero)
-      const [rows] = await conn.execute(
-        `SELECT id_traza, id_evento, servicio_origen, tipo_evento,
-                payload, correlation_id, registrado_en
-         FROM svc_aud.trazas_auditoria ${whereClause}
-         ORDER BY registrado_en DESC
-         LIMIT ${limitN} OFFSET ${offsetN}`,
-        params
-      );
+      let rows;
+      try {
+        [rows] = await conn.execute(
+          `SELECT id_traza, id_evento, servicio_origen, tipo_evento,
+                  payload, correlation_id, timestamp_origen, registrado_en,
+                  actor_id, actor_nombre, actor_rol
+           FROM svc_aud.trazas_auditoria ${whereClause}
+           ORDER BY registrado_en DESC
+           LIMIT ${limitN} OFFSET ${offsetN}`,
+          params
+        );
+      } catch (inner) {
+        if (inner.code !== 'ER_BAD_FIELD_ERROR') throw inner;
+        [rows] = await conn.execute(
+          `SELECT id_traza, id_evento, servicio_origen, tipo_evento,
+                  payload, correlation_id, registrado_en
+           FROM svc_aud.trazas_auditoria ${whereClause}
+           ORDER BY registrado_en DESC
+           LIMIT ${limitN} OFFSET ${offsetN}`,
+          params
+        );
+      }
 
       return {
         total: totalRows[0].total,
@@ -79,14 +113,28 @@ class TrazasMySQLRepository {
   async buscarPorCorrelationId(correlationId) {
     const conn = await this.pool.getConnection();
     try {
-      const [rows] = await conn.execute(
-        `SELECT id_traza, id_evento, servicio_origen, tipo_evento,
-                payload, correlation_id, registrado_en
-         FROM svc_aud.trazas_auditoria
-         WHERE correlation_id = ?
-         ORDER BY registrado_en ASC`,  // Cronológico — del primero al último
-        [correlationId]
-      );
+      let rows;
+      try {
+        [rows] = await conn.execute(
+          `SELECT id_traza, id_evento, servicio_origen, tipo_evento,
+                  payload, correlation_id, timestamp_origen, registrado_en,
+                  actor_id, actor_nombre, actor_rol
+           FROM svc_aud.trazas_auditoria
+           WHERE correlation_id = ?
+           ORDER BY COALESCE(timestamp_origen, registrado_en) ASC`,
+          [correlationId]
+        );
+      } catch (inner) {
+        if (inner.code !== 'ER_BAD_FIELD_ERROR') throw inner;
+        [rows] = await conn.execute(
+          `SELECT id_traza, id_evento, servicio_origen, tipo_evento,
+                  payload, correlation_id, registrado_en
+           FROM svc_aud.trazas_auditoria
+           WHERE correlation_id = ?
+           ORDER BY registrado_en ASC`,
+          [correlationId]
+        );
+      }
       return rows.map(this._mapear);
     } catch (err) {
       throw new DomainError('ERROR_INTERNO_AUD', 500, 'Error al buscar trazas por correlación');
@@ -104,7 +152,10 @@ class TrazasMySQLRepository {
       routingKey:      null,
       payload:         typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload,
       correlationId:   r.correlation_id,
-      timestampOrigen: null,
+      timestampOrigen: r.timestamp_origen ? new Date(r.timestamp_origen).toISOString() : null,
+      actor: r.actor_id
+        ? { id: r.actor_id, nombre: r.actor_nombre, rol: r.actor_rol }
+        : null,
     });
     traza.recibidoEn = r.registrado_en;
     return traza;

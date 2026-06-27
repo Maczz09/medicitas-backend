@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const db = require('../src/config/database');
 const rabbitmq = require('../src/config/rabbitmq');
 
-const SCHEMAS = ['svc_cit', 'svc_pac', 'svc_med', 'svc_pag', 'svc_hcl', 'svc_seg', 'svc_not', 'svc_aud', 'svc_pre', 'svc_fac'];
+const SCHEMAS = ['medicitas_users', 'svc_cit', 'svc_pac', 'svc_med', 'svc_pag', 'svc_hcl', 'svc_seg', 'svc_not', 'svc_aud', 'svc_pre', 'svc_fac'];
 
 // El proyecto tiene DOS convenciones de columnas en las tablas outbox.
 // Detectamos cuál usa cada esquema y construimos las consultas en consecuencia.

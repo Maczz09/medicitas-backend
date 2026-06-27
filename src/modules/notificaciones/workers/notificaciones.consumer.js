@@ -44,6 +44,8 @@ async function startConsumers() {
         }
         else if (routingKey === 'event.CitaCancelada' || routingKey === 'event.CitaCanceladaPorTolerancia') {
           await notificacionSvc.enviarSMS('999888777', `Tu cita fue cancelada. Motivo: ${eventoPayload.motivo || 'Tolerancia de pago excedida'}`);
+          const { smsEnviadosCounter } = require('../../../config/metrics');
+          smsEnviadosCounter.inc();
         }
         else if (routingKey === 'event.PagoConfirmado') {
           await notificacionSvc.enviarEmail('paciente@example.com', 'Pago Confirmado - Cita Confirmada', `El pago de tu cita ha sido confirmado con éxito. ¡Te esperamos!`);

@@ -34,15 +34,22 @@ function crearCircuitBreaker(llamadaExterna) {
   const breaker = new CircuitBreaker(llamadaExterna, opciones);
 
   // ── Eventos de observabilidad ─────────────────────────────────────────────
-  // Sin .fallback() — los rechazos llegan a conRetryYFallback como excepciones
-  breaker.on('open',     () => logger.warn({ servicio: 'AseguradoraAPI' },
-    'Circuit Breaker ABIERTO — demasiados fallos. Próximas llamadas irán directamente al fallback.'));
+  const { circuitBreakerStateGauge } = require('../../../../../../config/metrics');
+  
+  breaker.on('open',     () => {
+    logger.warn({ servicio: 'AseguradoraAPI' }, 'Circuit Breaker ABIERTO — demasiados fallos. Próximas llamadas irán directamente al fallback.');
+    circuitBreakerStateGauge.set({ service: 'AseguradoraAPI' }, 1);
+  });
 
-  breaker.on('halfOpen', () => logger.info({ servicio: 'AseguradoraAPI' },
-    'Circuit Breaker SEMI-ABIERTO — probando reconexión con API Aseguradora.'));
+  breaker.on('halfOpen', () => {
+    logger.info({ servicio: 'AseguradoraAPI' }, 'Circuit Breaker SEMI-ABIERTO — probando reconexión con API Aseguradora.');
+    circuitBreakerStateGauge.set({ service: 'AseguradoraAPI' }, 2);
+  });
 
-  breaker.on('close',    () => logger.info({ servicio: 'AseguradoraAPI' },
-    'Circuit Breaker CERRADO — API Aseguradora disponible nuevamente.'));
+  breaker.on('close',    () => {
+    logger.info({ servicio: 'AseguradoraAPI' }, 'Circuit Breaker CERRADO — API Aseguradora disponible nuevamente.');
+    circuitBreakerStateGauge.set({ service: 'AseguradoraAPI' }, 0);
+  });
 
   breaker.on('timeout',  () => logger.warn({ servicio: 'AseguradoraAPI' },
     `Circuit Breaker: timeout de ${opciones.timeout}ms superado.`));
