@@ -55,13 +55,23 @@ class Cita {
   }
 
   cancelar() {
-    const estadosCancelables = [CitaEstado.PENDIENTE];
+    const estadosCancelables = [CitaEstado.PENDIENTE, CitaEstado.EN_ATENCION];
     if (!estadosCancelables.includes(this.estado)) {
       throw new TransicionEstadoInvalidaError(
         `No se puede cancelar una cita en estado '${this.estado}'`
       );
     }
     this.estado = CitaEstado.CANCELADA;
+    return this;
+  }
+
+  revertirIngreso() {
+    if (this.estado !== CitaEstado.EN_ATENCION) {
+      throw new TransicionEstadoInvalidaError(
+        `Solo se puede revertir el ingreso desde 'En_Atencion'. Estado actual: ${this.estado}`
+      );
+    }
+    this.estado = CitaEstado.PENDIENTE;
     return this;
   }
 

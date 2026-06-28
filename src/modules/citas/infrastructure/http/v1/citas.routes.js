@@ -17,6 +17,7 @@ const { ReservarCitaUseCase } = require('../../../application/use-cases/Reservar
 const { CancelarCitaUseCase } = require('../../../application/use-cases/CancelarCitaUseCase');
 const { ReprogramarCitaUseCase } = require('../../../application/use-cases/ReprogramarCitaUseCase');
 const { RegistrarIngresoUseCase } = require('../../../application/use-cases/RegistrarIngresoUseCase');
+const { RevertirIngresoUseCase } = require('../../../application/use-cases/RevertirIngresoUseCase');
 const { CompletarCitaUseCase } = require('../../../application/use-cases/CompletarCitaUseCase');
 const { ConsultarCitaUseCase } = require('../../../application/use-cases/ConsultarCitaUseCase');
 
@@ -60,6 +61,12 @@ const registrarIngresoUseCase = new RegistrarIngresoUseCase({
   getConnection
 });
 
+const revertirIngresoUseCase = new RevertirIngresoUseCase({
+  citasRepository: citasRepo,
+  eventPublisher,
+  getConnection
+});
+
 const completarCitaUseCase = new CompletarCitaUseCase({
   citasRepository: citasRepo,
   getConnection
@@ -75,6 +82,7 @@ const controller = new CitasController({
   cancelarCitaUseCase,
   reprogramarCitaUseCase,
   registrarIngresoUseCase,
+  revertirIngresoUseCase,
   completarCitaUseCase,
   consultarCitaUseCase
 });
@@ -315,6 +323,12 @@ router.post('/:id/ingreso',
   verifyToken,
   requireRole(['Recepcionista', 'Auditor']),
   controller.registrarIngreso
+);
+
+router.patch('/:id/revertir-ingreso',
+  verifyToken,
+  requireRole(['Recepcionista', 'Auditor']),
+  controller.revertirIngreso
 );
 
 // INTERNAL: Llamado por SVC-HCL-002

@@ -28,9 +28,12 @@ async function connect() {
       durable: true,
       arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.notificaciones.dlq' }
     });
-    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'citas.*');
-    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'pagos.PagoAprobado');
-    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'facturacion.ComprobanteEmitido');
+    // Routing key pattern: event.<TipoEvento> (ver publishEvent)
+    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaCreada');
+    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaCancelada');
+    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaReprogramada');
+    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.PagoAprobado');
+    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.ComprobanteEmitido');
 
     // Prescripciones
     await channel.assertQueue('q.prescripciones.dlq', { durable: true });

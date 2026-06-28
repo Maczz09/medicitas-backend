@@ -16,7 +16,9 @@ class PacienteHttpAdapter {
           timeout: 3000,
         }
       );
-      const telefono = data?.telefono?.trim();
+      // El endpoint devuelve { data: paciente, correlationId }
+      const paciente = data?.data ?? data;
+      const telefono = paciente?.telefono?.trim();
       return telefono || null;
     } catch (err) {
       if (err.response?.status === 404) return null;

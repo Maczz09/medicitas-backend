@@ -19,7 +19,8 @@ const hclRouter = require('./modules/historiaClinica/routes/historiaClinica.rout
 const preRouter = require('./modules/prescripciones/routes/prescripciones.routes');
 const facRouter = require('./modules/facturacion/routes/facturacion.routes');
 const audRouter = require('./modules/auditoria/routes/auditoria.routes');
-const notRouter = require('./modules/notificaciones/routes/notificaciones.routes');
+const notRouter     = require('./modules/notificaciones/routes/notificaciones.routes');
+const twilioWebhook = require('./shared/infrastructure/webhooks/twilio.webhook');
 
 const app = express();
 
@@ -69,6 +70,9 @@ app.use('/api/v1/prescripciones', preRouter);
 app.use('/api/v1/facturacion', facRouter);
 app.use('/api/v1/auditoria', audRouter);
 app.use('/api/v1/notificaciones', notRouter);
+
+// Webhooks externos (sin rate-limit ni auth — validados por firma Twilio)
+app.use('/webhooks/twilio', twilioWebhook);
 
 // Ruta Swagger
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));

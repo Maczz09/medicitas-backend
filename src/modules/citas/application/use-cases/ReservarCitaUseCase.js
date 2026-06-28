@@ -85,12 +85,25 @@ class ReservarCitaUseCase {
 
       await this.citasRepo.save(cita, conn);
 
+      // Enriquecer el evento con nombres para el WhatsApp de confirmación
+      const [[medRow]] = await conn.query(
+        `SELECT CONCAT('Dr. ', nombre, ' ', apellido) AS nombre FROM svc_med.medicos WHERE id_medico = ?`,
+        [cita.idMedico]
+      );
+      const [[pacRow]] = await conn.query(
+        `SELECT CONCAT(nombre, ' ', apellido) AS nombre, telefono FROM svc_pac.pacientes WHERE id_paciente = ?`,
+        [cita.idPaciente]
+      );
+
       await this.eventPublisher.publish(conn, 'CitaCreada', {
-        idCita: cita.id,
-        idPaciente: cita.idPaciente,
-        idMedico: cita.idMedico,
-        fechaHora: cita.fechaHora.toISOString(),
-        especialidad: cita.especialidad,
+        idCita:            cita.id,
+        idPaciente:        cita.idPaciente,
+        idMedico:          cita.idMedico,
+        fechaHora:         cita.fechaHora.toISOString(),
+        especialidad:      cita.especialidad,
+        pacienteNombre:    pacRow?.nombre ?? null,
+        medicoNombre:      medRow?.nombre ?? null,
+        pacienteTelefono:  pacRow?.telefono ?? null,
       }, correlationId);
 
       await conn.commit();

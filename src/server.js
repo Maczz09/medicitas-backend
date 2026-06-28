@@ -66,13 +66,13 @@ async function bootstrap() {
     const { MensajesSMSMySQLRepository } = require('./modules/notificaciones/adapters/out/repositories/MensajesSMSMySQLRepository');
     const { PacienteHttpAdapter: NotificacionesPacienteHttpAdapter }        = require('./modules/notificaciones/adapters/out/http/PacienteHttpAdapter');
     const { OutboxMySQLPublisher: NotificacionesOutboxMySQLPublisher }       = require('./modules/notificaciones/adapters/out/events/OutboxMySQLPublisher');
+    const { TwilioWhatsAppAdapter }      = require('./modules/notificaciones/adapters/out/gateway/TwilioWhatsAppAdapter');
     const { SMSMockAdapter }             = require('./modules/notificaciones/adapters/out/gateway/SMSMockAdapter');
-    const { SMSAxiosAdapter }            = require('./modules/notificaciones/adapters/out/gateway/SMSAxiosAdapter');
     const { NotificarPacienteUseCase }   = require('./modules/notificaciones/application/use-cases/NotificarPacienteUseCase');
 
-    const gateway = process.env.USE_MOCK_SMS === 'true' || true // Forzamos MOCK por ahora hasta tener vars reales
+    const gateway = process.env.USE_MOCK_SMS === 'true'
       ? new SMSMockAdapter()
-      : new SMSAxiosAdapter();
+      : new TwilioWhatsAppAdapter();
 
     const useCase = new NotificarPacienteUseCase({
       mensajesSMSRepository: new MensajesSMSMySQLRepository(database),

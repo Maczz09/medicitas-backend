@@ -32,12 +32,16 @@ class NotificarPacienteUseCase {
       return;
     }
 
-    // ── 3. Obtener teléfono del paciente (SVC-PAC-005) ────────────────────────
-    // Si falla → propagamos el error → consumer hará NACK → reintento
-    const telefono = await this.pacienteTelefono.obtenerTelefono(idPaciente);
+    // ── 3. Obtener teléfono del paciente ─────────────────────────────────────
+    // Si el evento ya trae el teléfono en el payload lo usamos directamente
+    // (evita HTTP al mismo servicio que puede chocar con el rate-limiter).
+    let telefono = payload.pacienteTelefono || null;
+    if (!telefono) {
+      telefono = await this.pacienteTelefono.obtenerTelefono(idPaciente);
+    }
     if (!telefono) {
       throw new DomainError('PACIENTE_SIN_TELEFONO', 422,
-        `El paciente ${idPaciente} no tiene teléfono registrado. No se puede enviar SMS.`);
+        `El paciente ${idPaciente} no tiene teléfono registrado. No se puede enviar WhatsApp.`);
     }
 
     const idMensaje = require('crypto').randomUUID();

@@ -1,144 +1,140 @@
 const cron = require('node-cron');
-const db = require('../src/config/database');
-const { v4: uuidv4 } = require('uuid');
+const db   = require('../src/config/database');
+const NotificacionService = require('../src/modules/notificaciones/infrastructure/notificacion.service');
+
+const sms = new NotificacionService();
+
+function fmtHora(fecha) {
+  return new Date(fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+function fmtFecha(fecha) {
+  return new Date(fecha).toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' });
+}
 
 async function processRecordatorios30m() {
-  const conn = await db.getConnection();
-  try {
-    const [citas] = await conn.query(
-      `SELECT * FROM svc_cit.citas 
-       WHERE estado = 'Pendiente' 
-       AND recordatorio_30m = 0 
-       AND fecha_hora > NOW() 
-       AND fecha_hora <= DATE_ADD(NOW(), INTERVAL 30 MINUTE)`
-    );
-
-    for (const cita of citas) {
-      await conn.beginTransaction();
-
-      await conn.query(
-        `UPDATE svc_cit.citas SET recordatorio_30m = 1 WHERE id = ?`,
-        [cita.id]
-      );
-
-      const correlationId = uuidv4();
-      await conn.query(
-        `INSERT INTO svc_cit.outbox (id, evento, payload, correlation_id, publicado) VALUES (?, ?, ?, ?, ?)`,
-        [
-          uuidv4(),
-          'RecordatorioCita',
-          JSON.stringify({
-            id_cita: cita.id,
-            id_paciente: cita.id_paciente,
-            fecha_hora: cita.fecha_hora,
-            mensaje: 'Su cita médica comienza en 30 minutos. Por favor acérquese a recepción.'
-          }),
-          correlationId,
-          0
-        ]
-      );
-
-      await conn.commit();
-      console.log(`[AlertasLlegada] Recordatorio 30m enviado para cita ${cita.id}.`);
-    }
-  } catch (err) {
-    console.error('[AlertasLlegada] Error en recordatorios 30m:', err);
-    if (conn) await conn.rollback();
-  } finally {
-    if (conn) conn.release();
-  }
-}
-
-async function processAlertasRetraso() {
-  const conn = await db.getConnection();
-  try {
-    // Buscar citas que ya empezaron (o están a punto) y aún no han sido ingresadas (estado = Pendiente)
-    const [citas] = await conn.query(
-      `SELECT * FROM svc_cit.citas 
-       WHERE estado = 'Pendiente' 
-       AND fecha_hora <= NOW()`
-    );
-
-    for (const cita of citas) {
-      // Calcular cuántos minutos han pasado desde la fecha_hora
-      const minutosRetraso = Math.floor((new Date() - new Date(cita.fecha_hora)) / 60000);
-
-      await conn.beginTransaction();
-
-      if (minutosRetraso >= 15) {
-        // Expirar la cita
-        await conn.query(
-          `UPDATE svc_cit.citas SET estado = 'No_Asistida' WHERE id = ?`,
-          [cita.id]
-        );
-        const correlationId = uuidv4();
-        await conn.query(
-          `INSERT INTO svc_cit.outbox (id, evento, payload, correlation_id, publicado) VALUES (?, ?, ?, ?, ?)`,
-          [
-            uuidv4(),
-            'CitaExpirada',
-            JSON.stringify({
-              id_cita: cita.id,
-              id_paciente: cita.id_paciente,
-              motivo: 'Se canceló por inasistencia. Pasaron 15 minutos de tolerancia.'
-            }),
-            correlationId,
-            0
-          ]
-        );
-        console.log(`[AlertasLlegada] Cita ${cita.id} expirada por inasistencia (>15m).`);
-
-      } else if (minutosRetraso >= 10 && cita.alerta_min10 === 0) {
-        // Alerta min 10
-        await conn.query(`UPDATE svc_cit.citas SET alerta_min10 = 1 WHERE id = ?`, [cita.id]);
-        await enqueueAlerta(conn, cita, 10, 'Último aviso. Le quedan 5 minutos de tolerancia para presentarse a su cita.');
-      } else if (minutosRetraso >= 5 && cita.alerta_min5 === 0) {
-        // Alerta min 5
-        await conn.query(`UPDATE svc_cit.citas SET alerta_min5 = 1 WHERE id = ?`, [cita.id]);
-        await enqueueAlerta(conn, cita, 5, 'Su cita comenzó hace 5 minutos. Si no se presenta en 10 minutos, la cita se cancelará automáticamente.');
-      } else if (minutosRetraso >= 0 && cita.alerta_min0 === 0) {
-        // Alerta min 0
-        await conn.query(`UPDATE svc_cit.citas SET alerta_min0 = 1 WHERE id = ?`, [cita.id]);
-        await enqueueAlerta(conn, cita, 0, 'Su cita médica ha comenzado. Por favor, acérquese al consultorio.');
-      }
-
-      await conn.commit();
-    }
-  } catch (err) {
-    console.error('[AlertasLlegada] Error en alertas de retraso:', err);
-    if (conn) await conn.rollback();
-  } finally {
-    if (conn) conn.release();
-  }
-}
-
-async function enqueueAlerta(conn, cita, minuto, mensaje) {
-  const correlationId = uuidv4();
-  await conn.query(
-    `INSERT INTO svc_cit.outbox (id, evento, payload, correlation_id, publicado) VALUES (?, ?, ?, ?, ?)`,
-    [
-      uuidv4(),
-      'AlertaRetraso',
-      JSON.stringify({
-        id_cita: cita.id,
-        id_paciente: cita.id_paciente,
-        minutos_retraso: minuto,
-        mensaje
-      }),
-      correlationId,
-      0
-    ]
+  const [citas] = await db.query(
+    `SELECT c.id, c.id_paciente, c.id_medico, c.fecha_hora, c.especialidad,
+            CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
+            p.telefono AS paciente_telefono,
+            CONCAT('Dr. ', m.nombre, ' ', m.apellido) AS medico_nombre
+     FROM svc_cit.citas c
+     LEFT JOIN svc_pac.pacientes p ON p.id_paciente = c.id_paciente
+     LEFT JOIN svc_med.medicos m ON m.id_medico = c.id_medico
+     WHERE c.estado = 'Pendiente'
+       AND c.recordatorio_30m = 0
+       AND c.fecha_hora BETWEEN DATE_ADD(NOW(), INTERVAL 28 MINUTE) AND DATE_ADD(NOW(), INTERVAL 32 MINUTE)`
   );
-  console.log(`[AlertasLlegada] AlertaRetraso (min ${minuto}) enviada para cita ${cita.id}.`);
+
+  for (const cita of citas) {
+    try {
+      await db.execute('UPDATE svc_cit.citas SET recordatorio_30m = 1 WHERE id = ?', [cita.id]);
+
+      const hora  = fmtHora(cita.fecha_hora);
+      const fecha = fmtFecha(cita.fecha_hora);
+      const msg =
+        `📅 Recordatorio Medicitas — Hola ${cita.paciente_nombre}, ` +
+        `tienes una cita con ${cita.medico_nombre} (${cita.especialidad}) ` +
+        `HOY ${fecha} a las ${hora}. ` +
+        `Por favor llega con 10 minutos de anticipación y trae tu documento de identidad.`;
+
+      await sms.enviarSMS(cita.paciente_telefono, msg);
+      console.log(`[AlertasLlegada] Recordatorio 30min enviado — cita ${cita.id}`);
+    } catch (err) {
+      console.error(`[AlertasLlegada] Error recordatorio 30min cita ${cita.id}:`, err.message);
+    }
+  }
 }
 
-async function runAlertas() {
-  await processRecordatorios30m();
-  await processAlertasRetraso();
+async function processAlertasYExpiracion() {
+  const [citas] = await db.query(
+    `SELECT c.id, c.id_paciente, c.id_medico, c.fecha_hora, c.especialidad, c.correlation_id,
+            c.alerta_min0, c.alerta_min5, c.alerta_min10,
+            CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
+            p.telefono AS paciente_telefono,
+            CONCAT('Dr. ', m.nombre, ' ', m.apellido) AS medico_nombre
+     FROM svc_cit.citas c
+     LEFT JOIN svc_pac.pacientes p ON p.id_paciente = c.id_paciente
+     LEFT JOIN svc_med.medicos m ON m.id_medico = c.id_medico
+     WHERE c.estado = 'Pendiente'
+       AND c.fecha_hora <= NOW()`
+  );
+
+  for (const cita of citas) {
+    const diffMin = Math.floor((Date.now() - new Date(cita.fecha_hora).getTime()) / 60000);
+    const hora    = fmtHora(cita.fecha_hora);
+    const fecha   = fmtFecha(cita.fecha_hora);
+
+    const conn = await db.getConnection();
+    await conn.beginTransaction();
+    try {
+      if (diffMin >= 15) {
+        await conn.execute("UPDATE svc_cit.citas SET estado = 'No_Asistida' WHERE id = ?", [cita.id]);
+        await conn.commit();
+
+        const msg =
+          `⛔ Medicitas — ${cita.paciente_nombre}, tu cita con ${cita.medico_nombre} ` +
+          `del ${fecha} a las ${hora} fue registrada como NO ASISTIDA ` +
+          `al superar los 15 minutos de tolerancia. ` +
+          `Contáctanos al +51 1 234-5678 para reprogramar.`;
+        await sms.enviarSMS(cita.paciente_telefono, msg);
+        console.log(`[AlertasLlegada] Cita ${cita.id} → No_Asistida`);
+
+      } else if (diffMin >= 10 && !cita.alerta_min10) {
+        await conn.execute('UPDATE svc_cit.citas SET alerta_min10 = 1 WHERE id = ?', [cita.id]);
+        await conn.commit();
+
+        const msg =
+          `⚠️ Medicitas — ${cita.paciente_nombre}, ya van 10 minutos desde tu cita ` +
+          `con ${cita.medico_nombre} (${hora}). ` +
+          `Solo te quedan 5 minutos antes de que sea marcada como NO ASISTIDA. ` +
+          `Por favor, preséntate de inmediato.`;
+        await sms.enviarSMS(cita.paciente_telefono, msg);
+        console.log(`[AlertasLlegada] Alerta min10 — cita ${cita.id}`);
+
+      } else if (diffMin >= 5 && !cita.alerta_min5) {
+        await conn.execute('UPDATE svc_cit.citas SET alerta_min5 = 1 WHERE id = ?', [cita.id]);
+        await conn.commit();
+
+        const msg =
+          `⚠️ Medicitas — ${cita.paciente_nombre}, han pasado 5 minutos ` +
+          `desde tu cita con ${cita.medico_nombre} (${hora}). ` +
+          `Tienes 10 minutos más de tolerancia antes del cierre. ¡Date prisa!`;
+        await sms.enviarSMS(cita.paciente_telefono, msg);
+        console.log(`[AlertasLlegada] Alerta min5 — cita ${cita.id}`);
+
+      } else if (diffMin >= 0 && !cita.alerta_min0) {
+        await conn.execute('UPDATE svc_cit.citas SET alerta_min0 = 1 WHERE id = ?', [cita.id]);
+        await conn.commit();
+
+        const msg =
+          `🔔 Medicitas — ${cita.paciente_nombre}, tu cita con ${cita.medico_nombre} ` +
+          `(${cita.especialidad}) acaba de comenzar a las ${hora}. ` +
+          `Dirígete a la recepción de inmediato. Tienes 15 minutos de tolerancia.`;
+        await sms.enviarSMS(cita.paciente_telefono, msg);
+        console.log(`[AlertasLlegada] Alerta min0 — cita ${cita.id}`);
+
+      } else {
+        await conn.commit();
+      }
+    } catch (err) {
+      await conn.rollback();
+      console.error(`[AlertasLlegada] Error cita ${cita.id}:`, err.message);
+    } finally {
+      conn.release();
+    }
+  }
 }
 
-cron.schedule('* * * * *', () => {
-  runAlertas().catch(console.error);
+cron.schedule('* * * * *', async () => {
+  try {
+    await Promise.all([
+      processRecordatorios30m(),
+      processAlertasYExpiracion(),
+    ]);
+  } catch (err) {
+    console.error('[AlertasLlegada] Error general:', err.message);
+  }
 });
 
 console.log('[Worker] Alertas Llegada cron iniciado (cada minuto).');

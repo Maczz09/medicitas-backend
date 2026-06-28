@@ -5,7 +5,7 @@ const { TipoComprobante } = require('../../domain/value-objects/TipoComprobante'
 const { MontosPago }      = require('../../domain/value-objects/MontosPago');
 const logger = require('../../../../shared/logger/logger');
 
-const ESTADOS_COBRABLES = ['En_Atencion', 'Completada'];
+const ESTADOS_COBRABLES = ['Pendiente', 'En_Atencion', 'Completada'];
 
 class ConfirmarPagoUseCase {
   constructor({ pagosRepository, citaValidator, coberturaValidator, eventPublisher, getConnection }) {
@@ -89,9 +89,9 @@ class ConfirmarPagoUseCase {
     await conn.beginTransaction();
 
     try {
-      // Verificar duplicado con SELECT FOR UPDATE antes de insertar
+      // Verificar duplicado — excluir pagos REVERSADOS (se pueden re-cobrar)
       const [duplicado] = await conn.execute(
-        `SELECT id_pago FROM svc_pag.pagos WHERE id_cita = ? FOR UPDATE`,
+        `SELECT id_pago FROM svc_pag.pagos WHERE id_cita = ? AND estado != 'REVERSADO' FOR UPDATE`,
         [idCita]
       );
       if (duplicado.length > 0) {

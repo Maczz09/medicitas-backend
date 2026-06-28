@@ -4,15 +4,17 @@ class CitasController {
     cancelarCitaUseCase,
     reprogramarCitaUseCase,
     registrarIngresoUseCase,
+    revertirIngresoUseCase,
     completarCitaUseCase,
     consultarCitaUseCase
   }) {
-    this.reservarCitaUC = reservarCitaUseCase;
-    this.cancelarCitaUC = cancelarCitaUseCase;
-    this.reprogramarCitaUC = reprogramarCitaUseCase;
+    this.reservarCitaUC     = reservarCitaUseCase;
+    this.cancelarCitaUC     = cancelarCitaUseCase;
+    this.reprogramarCitaUC  = reprogramarCitaUseCase;
     this.registrarIngresoUC = registrarIngresoUseCase;
-    this.completarCitaUC = completarCitaUseCase;
-    this.consultarCitaUC = consultarCitaUseCase;
+    this.revertirIngresoUC  = revertirIngresoUseCase;
+    this.completarCitaUC    = completarCitaUseCase;
+    this.consultarCitaUC    = consultarCitaUseCase;
   }
 
   reservarCita = async (req, res, next) => {
@@ -65,6 +67,18 @@ class CitasController {
     try {
       const result = await this.registrarIngresoUC.ejecutar(
         { idCita: req.params.id }, 
+        req.correlationId
+      );
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  revertirIngreso = async (req, res, next) => {
+    try {
+      const result = await this.revertirIngresoUC.ejecutar(
+        { idCita: req.params.id },
         req.correlationId
       );
       res.status(200).json(result);

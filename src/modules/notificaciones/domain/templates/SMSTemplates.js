@@ -11,8 +11,11 @@ const _hora = (iso) =>
 
 const PLANTILLAS = Object.freeze({
 
-  CitaCreada: ({ fechaHora, especialidad }) =>
-    `MediCitas: Cita confirmada el ${_fecha(fechaHora)} a las ${_hora(fechaHora)} (${especialidad}). Le recordaremos 30 min antes.`,
+  CitaCreada: ({ fechaHora, especialidad, pacienteNombre, medicoNombre }) =>
+    `✅ Medicitas — Hola ${pacienteNombre || 'paciente'}, tu cita ha sido confirmada.\n` +
+    `👨‍⚕️ ${medicoNombre || 'Médico asignado'} · ${especialidad}\n` +
+    `📅 ${_fecha(fechaHora)} a las ${_hora(fechaHora)}\n` +
+    `Te enviaremos un recordatorio 30 min antes. ¡Te esperamos!`,
 
   CitaCancelada: ({ fechaHora }) =>
     `MediCitas: Su cita del ${_fecha(fechaHora)} ha sido cancelada. Llámenos para reagendar.`,
