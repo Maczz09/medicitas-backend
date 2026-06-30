@@ -57,11 +57,12 @@ class IniciarDespachoUseCase {
 
     // El adaptador NUNCA lanza — siempre resuelve con { aceptada, referenciaFarmacia, motivoRechazo, origenFallo }
     const resultado = await this.farmaciaGateway.enviarReceta({
-      idReceta:    despacho.id,
-      farmaciaId:  despacho.idFarmacia,
-      medicamento: contenido.medicamento,
-      dosis:       contenido.dosis,
-      cantidad:    contenido.cantidad,
+      idReceta:             despacho.id,
+      farmaciaId:           despacho.idFarmacia,
+      idEncuentroClinico:   despacho.idEncuentroClinico,
+      medicamento:          contenido.medicamento,
+      dosis:                contenido.dosis,
+      cantidad:             contenido.cantidad,
     });
 
     const conn = await this.getConnection();

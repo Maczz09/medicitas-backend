@@ -67,18 +67,33 @@ async function processOutbox() {
   }
 }
 
+async function conectarConReintentos(maxIntentos = 10, delayMs = 3000) {
+  for (let i = 1; i <= maxIntentos; i++) {
+    try {
+      await rabbitmq.connect();
+      console.log('[Outbox] RabbitMQ conectado exitosamente.');
+      return;
+    } catch (err) {
+      console.error(`[Outbox] Intento ${i}/${maxIntentos} fallido: ${err.message}`);
+      if (i < maxIntentos) await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  console.error('[Outbox] No se pudo conectar a RabbitMQ tras todos los intentos. El cron publicará con reintentos automáticos.');
+}
+
 // PM2 lanza este worker como proceso independiente (no pasa por workers/index.js),
 // por lo que debe abrir su propia conexión/canal a RabbitMQ antes de publicar.
 (async () => {
-  try {
-    if (!rabbitmq.getChannel()) {
-      await rabbitmq.connect();
-    }
-  } catch (err) {
-    console.error('[Outbox] No se pudo conectar a RabbitMQ al iniciar:', err.message);
+  if (!rabbitmq.getChannel()) {
+    await conectarConReintentos();
   }
 
-  cron.schedule('*/5 * * * * *', () => {
+  cron.schedule('*/5 * * * * *', async () => {
+    // Si el canal se perdió (reconexión tras caída), intentar reconectar antes de publicar
+    if (!rabbitmq.getChannel()) {
+      console.warn('[Outbox] Canal perdido — intentando reconectar...');
+      await conectarConReintentos(3, 1000);
+    }
     processOutbox().catch(console.error);
   });
 

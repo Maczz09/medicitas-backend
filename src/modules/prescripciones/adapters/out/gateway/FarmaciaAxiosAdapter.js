@@ -54,9 +54,9 @@ class FarmaciaAxiosAdapter {
    * - Si breaker.fire() resuelve → forwarda la respuesta.
    * - Si breaker.fire() rechaza (timeout, CB abierto, 5xx) → mapea a TRANSPORTE.
    */
-  async enviarReceta({ idReceta, farmaciaId, medicamento, dosis, cantidad }) {
+  async enviarReceta({ idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad }) {
     try {
-      return await this.breaker.fire({ idReceta, farmaciaId, medicamento, dosis, cantidad });
+      return await this.breaker.fire({ idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad });
     } catch (err) {
       return this._mapearFalloATransporte(err);
     }
@@ -66,11 +66,12 @@ class FarmaciaAxiosAdapter {
    * Llamada HTTP real — envuelta por el Circuit Breaker.
    * La URL completa viene de la variable de entorno (incluyendo la ruta del endpoint).
    */
-  async _llamadaReal({ idReceta, farmaciaId, medicamento, dosis, cantidad }) {
+  async _llamadaReal({ idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad }) {
     logger.info({ idReceta, farmaciaId }, '[FarmaciaAxiosAdapter] Enviando receta a farmacia-api real');
 
     const response = await this.client.post(process.env.FARMACIA_API_URL, {
       referenciaDespacho: idReceta,
+      idEncuentroClinico: idEncuentroClinico || null,
       farmacia: farmaciaId,
       medicamento,
       dosis,

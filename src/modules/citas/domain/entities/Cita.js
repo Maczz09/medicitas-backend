@@ -40,6 +40,17 @@ class Cita {
         `Solo se puede registrar ingreso desde 'Pendiente'. Estado actual: ${this.estado}`
       );
     }
+    // Solo se puede registrar ingreso el mismo día de la cita (zona horaria del servidor = Lima)
+    const ahora = new Date();
+    const mismoAnio  = ahora.getFullYear() === this.fechaHora.getFullYear();
+    const mismoMes   = ahora.getMonth()    === this.fechaHora.getMonth();
+    const mismoDia   = ahora.getDate()     === this.fechaHora.getDate();
+    if (!(mismoAnio && mismoMes && mismoDia)) {
+      const fechaStr = this.fechaHora.toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
+      throw new TransicionEstadoInvalidaError(
+        `Solo se puede registrar ingreso el día de la cita (${fechaStr})`
+      );
+    }
     this.estado = CitaEstado.EN_ATENCION;
     return this;
   }

@@ -4,7 +4,7 @@ class FarmaciaMockAdapter {
   // Misma firma que FarmaciaAxiosAdapter — contrato del puerto IFarmaciaGateway:
   //   enviarReceta({ idReceta, farmaciaId, medicamento, dosis, cantidad })
   //   → { aceptada, referenciaFarmacia, motivoRechazo, origenFallo }
-  async enviarReceta({ idReceta, farmaciaId, medicamento, dosis, cantidad }) {
+  async enviarReceta({ idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad }) {
     logger.info({ idReceta, farmaciaId }, '[MOCK] Simulando envío de receta a FarmaciaMockAdapter');
 
     await this._simularLatencia(150, 400);

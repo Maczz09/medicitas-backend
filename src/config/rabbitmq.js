@@ -2,52 +2,86 @@ const amqp = require('amqplib');
 
 let connection = null;
 let channel = null;
+let _reconnecting = false;
+let _onReconnectCallbacks = [];
+
+function registrarOnReconnect(fn) {
+  _onReconnectCallbacks.push(fn);
+}
 
 async function connect() {
-  try {
-    connection = await amqp.connect(process.env.RABBITMQ_URL || 'amqp://localhost:5672');
-    channel = await connection.createChannel();
-    
-    await channel.assertExchange('medicitas.events', 'topic', { durable: true });
-    
-    // Facturacion
-    await channel.assertQueue('q.facturacion', { durable: true });
-    await channel.bindQueue('q.facturacion', 'medicitas.events', 'event.PagoAprobado');
+  const url = process.env.RABBITMQ_URL || 'amqp://localhost:5672';
+  connection = await amqp.connect(url);
+  channel = await connection.createChannel();
 
-    // Auditoria
-    await channel.assertQueue('q.auditoria.dlq', { durable: true });
-    await channel.assertQueue('q.auditoria', {
-      durable: true,
-      arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.auditoria.dlq' }
-    });
-    await channel.bindQueue('q.auditoria', 'medicitas.events', '#');
+  await channel.assertExchange('medicitas.events', 'topic', { durable: true });
 
-    // Notificaciones
-    await channel.assertQueue('q.notificaciones.dlq', { durable: true });
-    await channel.assertQueue('q.notificaciones', {
-      durable: true,
-      arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.notificaciones.dlq' }
-    });
-    // Routing key pattern: event.<TipoEvento> (ver publishEvent)
-    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaCreada');
-    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaCancelada');
-    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaReprogramada');
-    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.PagoAprobado');
-    await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.ComprobanteEmitido');
+  // Facturacion
+  await channel.assertQueue('q.facturacion', { durable: true });
+  await channel.bindQueue('q.facturacion', 'medicitas.events', 'event.PagoAprobado');
 
-    // Prescripciones
-    await channel.assertQueue('q.prescripciones.dlq', { durable: true });
-    await channel.assertQueue('q.prescripciones', {
-      durable: true,
-      arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.prescripciones.dlq' }
-    });
-    await channel.bindQueue('q.prescripciones', 'medicitas.events', 'event.PrescripcionEmitida');
+  // Auditoria
+  await channel.assertQueue('q.auditoria.dlq', { durable: true });
+  await channel.assertQueue('q.auditoria', {
+    durable: true,
+    arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.auditoria.dlq' }
+  });
+  await channel.bindQueue('q.auditoria', 'medicitas.events', '#');
 
-    console.log('[RabbitMQ] Conectado exitosamente y Exchange declarado');
-  } catch (err) {
-    console.error('[RabbitMQ] Error de conexión:', err);
-    throw err;
+  // Notificaciones
+  await channel.assertQueue('q.notificaciones.dlq', { durable: true });
+  await channel.assertQueue('q.notificaciones', {
+    durable: true,
+    arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.notificaciones.dlq' }
+  });
+  await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaCreada');
+  await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaCancelada');
+  await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaReprogramada');
+  await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.PagoAprobado');
+  await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.ComprobanteEmitido');
+
+  // Prescripciones
+  await channel.assertQueue('q.prescripciones.dlq', { durable: true });
+  await channel.assertQueue('q.prescripciones', {
+    durable: true,
+    arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.prescripciones.dlq' }
+  });
+  await channel.bindQueue('q.prescripciones', 'medicitas.events', 'event.PrescripcionEmitida');
+
+  // Reconexión automática si la conexión se cierra
+  connection.on('close', () => {
+    console.warn('[RabbitMQ] Conexión cerrada — intentando reconectar en 5s...');
+    channel = null;
+    connection = null;
+    _scheduleReconnect();
+  });
+  connection.on('error', (err) => {
+    console.error('[RabbitMQ] Error en conexión:', err.message);
+  });
+
+  console.log('[RabbitMQ] Conectado exitosamente y Exchange declarado');
+}
+
+async function _scheduleReconnect() {
+  if (_reconnecting) return;
+  _reconnecting = true;
+  let delay = 3000;
+  while (!channel) {
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(delay * 2, 30000);
+    try {
+      await connect();
+      console.log('[RabbitMQ] Reconexión exitosa — re-registrando consumers...');
+      for (const fn of _onReconnectCallbacks) {
+        try { await fn(channel); } catch (e) { console.error('[RabbitMQ] Error en callback de reconexión:', e.message); }
+      }
+    } catch (err) {
+      console.error(`[RabbitMQ] Reconexión fallida, reintentando en ${delay}ms:`, err.message);
+      channel = null;
+      connection = null;
+    }
   }
+  _reconnecting = false;
 }
 
 async function publishEvent(tipoEvento, payload, correlationId, idEvento, origen) {
@@ -56,8 +90,6 @@ async function publishEvent(tipoEvento, payload, correlationId, idEvento, origen
   const routingKey = `event.${tipoEvento}`;
   const id = idEvento || require('uuid').v4();
 
-  // El payload puede venir como string (de la tabla outbox) o como objeto.
-  // Si viene como string, lo parseamos para poder extraer _actor.
   let parsedPayload;
   try {
     parsedPayload = typeof payload === 'string' ? JSON.parse(payload) : (payload || {});
@@ -65,8 +97,6 @@ async function publishEvent(tipoEvento, payload, correlationId, idEvento, origen
     parsedPayload = {};
   }
 
-  // Extraemos _actor y _timestamp del payload y los subimos al nivel del sobre para que
-  // Auditoría los capture sin contaminar el payload de dominio.
   const { _actor, _timestamp, ...cleanPayload } = parsedPayload;
 
   const sobre = {
@@ -92,4 +122,4 @@ function getChannel() {
   return channel;
 }
 
-module.exports = { connect, publishEvent, getChannel };
+module.exports = { connect, publishEvent, getChannel, registrarOnReconnect };
