@@ -10,7 +10,7 @@ const { CitasController } = require('./citas.controller');
 const { CitasMySQLRepository } = require('../../../adapters/out/repositories/CitasMySQLRepository');
 const { DisponibilidadRedisCache } = require('../../../adapters/out/cache/DisponibilidadRedisCache');
 const { PacienteHttpAdapter } = require('../../../adapters/out/http/PacienteHttpAdapter');
-const { MedicoDisponibilidadMockAdapter } = require('../../../adapters/out/http/MedicoDisponibilidadMockAdapter');
+const { MedicoDisponibilidadDBAdapter } = require('../../../adapters/out/http/MedicoDisponibilidadDBAdapter');
 const { OutboxMySQLPublisher } = require('../../../adapters/out/events/OutboxMySQLPublisher');
 
 const { ReservarCitaUseCase } = require('../../../application/use-cases/ReservarCitaUseCase');
@@ -25,7 +25,7 @@ const dbPool = require('../../../../../config/database');
 
 // Instancias de adaptadores
 const citasRepo = new CitasMySQLRepository();
-const medicoAdapter = new MedicoDisponibilidadMockAdapter();
+const medicoAdapter = new MedicoDisponibilidadDBAdapter();
 const cacheAdapter = new DisponibilidadRedisCache(medicoAdapter);
 const pacienteAdapter = new PacienteHttpAdapter();
 const eventPublisher = new OutboxMySQLPublisher();

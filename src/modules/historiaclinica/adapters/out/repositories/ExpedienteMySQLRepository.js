@@ -79,6 +79,20 @@ class ExpedienteMySQLRepository {
        JSON.stringify(expediente.alergias)]
     );
   }
+
+  async update(idPaciente, { grupoSanguineo, alergias }) {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.execute(
+        `UPDATE svc_hcl.expedientes
+         SET grupo_sanguineo = ?, alergias_conocidas = ?
+         WHERE id_paciente = ?`,
+        [grupoSanguineo || null, JSON.stringify(alergias || []), idPaciente],
+      );
+    } finally {
+      conn.release();
+    }
+  }
 }
 
 module.exports = { ExpedienteMySQLRepository };

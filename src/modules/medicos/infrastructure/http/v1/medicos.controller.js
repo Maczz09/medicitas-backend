@@ -88,6 +88,19 @@ exports.registrarHorarios = async (req, res, next) => {
   }
 };
 
+exports.getSlotsForDate = async (req, res, next) => {
+  try {
+    const { fecha } = req.query; // YYYY-MM-DD
+    if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      return res.status(400).json({ mensaje: 'El parámetro fecha es obligatorio (YYYY-MM-DD)' });
+    }
+    const data = await medicosUseCases.getSlotsForDate(req.params.id, fecha);
+    res.status(200).json({ data, correlationId: req.correlationId });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.registrarBloqueo = async (req, res, next) => {
   try {
     const result = await medicosUseCases.registrarBloqueo(req.params.id, req.body);

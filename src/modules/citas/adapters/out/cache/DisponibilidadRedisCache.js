@@ -1,6 +1,14 @@
 const { IDisponibilidadCache } = require('../../../ports/out');
 const { client: redis } = require('../../../../../config/redis');
 
+// Usa hora LOCAL del proceso (respeta TZ=America/Lima) para armar las cache keys
+function _localDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function _localTime(d) {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 class DisponibilidadRedisCache extends IDisponibilidadCache {
   constructor(medicoDisponibilidadAdapter) {
     super();
@@ -10,8 +18,8 @@ class DisponibilidadRedisCache extends IDisponibilidadCache {
   }
 
   async verificarDisponibilidad(idMedico, fechaHora) {
-    const fecha = fechaHora.toISOString().split('T')[0];
-    const hora  = fechaHora.toISOString().split('T')[1].slice(0, 5);
+    const fecha = _localDate(fechaHora);
+    const hora  = _localTime(fechaHora);
     const key   = `cache:disponibilidad:${idMedico}:${fecha}`;
 
     const cached = await this.redis.get(key);
@@ -33,8 +41,8 @@ class DisponibilidadRedisCache extends IDisponibilidadCache {
   }
 
   async marcarOcupado(idMedico, fechaHora) {
-    const fecha = fechaHora.toISOString().split('T')[0];
-    const hora  = fechaHora.toISOString().split('T')[1].slice(0, 5);
+    const fecha = _localDate(fechaHora);
+    const hora  = _localTime(fechaHora);
     const key   = `cache:disponibilidad:${idMedico}:${fecha}`;
 
     const cached = await this.redis.get(key);
@@ -49,8 +57,8 @@ class DisponibilidadRedisCache extends IDisponibilidadCache {
   }
 
   async liberarSlot(idMedico, fechaHora) {
-    const fecha = fechaHora.toISOString().split('T')[0];
-    const hora  = fechaHora.toISOString().split('T')[1].slice(0, 5);
+    const fecha = _localDate(fechaHora);
+    const hora  = _localTime(fechaHora);
     const key   = `cache:disponibilidad:${idMedico}:${fecha}`;
 
     const cached = await this.redis.get(key);

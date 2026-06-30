@@ -1,37 +1,36 @@
 const cron = require('node-cron');
-const { MedicoDisponibilidadMockAdapter } = require('../adapters/out/http/MedicoDisponibilidadMockAdapter');
+const { MedicoDisponibilidadDBAdapter } = require('../adapters/out/http/MedicoDisponibilidadDBAdapter');
 const { DisponibilidadRedisCache } = require('../adapters/out/cache/DisponibilidadRedisCache');
+const db = require('../../../config/database');
 
-const medicoAdapter = new MedicoDisponibilidadMockAdapter();
+const medicoAdapter = new MedicoDisponibilidadDBAdapter();
 const cacheAdapter = new DisponibilidadRedisCache(medicoAdapter);
 
-// Cache Sync Job: Se ejecuta cada 5 minutos
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Pre-calienta el cache de disponibilidad con los horarios reales de la BD
 cron.schedule('*/5 * * * *', async () => {
   try {
-    // NOTA: Como aún no existe un servicio real de Médicos (SVC-MED-006) ni una base de
-    // datos centralizada de médicos para iterar, en este mock simularemos la sincronización
-    // para un ID de médico de prueba (o una lista ficticia).
-    
-    const medicosMock = ['MED-10294', 'MED-99999'];
-    const hoy = new Date();
-    const manana = new Date();
-    manana.setDate(hoy.getDate() + 1);
-    
-    const fechas = [
-      hoy.toISOString().split('T')[0],
-      manana.toISOString().split('T')[0]
-    ];
+    const [medicos] = await db.query(`SELECT id_medico FROM svc_med.medicos WHERE activo = 1`);
+    if (!medicos.length) return;
 
-    for (const idMedico of medicosMock) {
+    const hoy    = new Date();
+    const manana = new Date(hoy);
+    manana.setDate(hoy.getDate() + 1);
+    const fechas = [localDateStr(hoy), localDateStr(manana)];
+
+    for (const { id_medico } of medicos) {
       for (const fecha of fechas) {
-        const slots = await medicoAdapter.obtenerDisponibilidad(idMedico, fecha);
+        const slots = await medicoAdapter.obtenerDisponibilidad(id_medico, fecha);
         if (slots && slots.length > 0) {
-          await cacheAdapter.refrescarDesdeServicio(idMedico, fecha, slots);
+          await cacheAdapter.refrescarDesdeServicio(id_medico, fecha, slots);
         }
       }
     }
-    
-    console.log('[CacheSyncJob] Sincronización de caché de disponibilidad completada.');
+
+    console.log('[CacheSyncJob] Caché de disponibilidad sincronizada.');
   } catch (error) {
     console.error('[CacheSyncJob] Error sincronizando caché:', error);
   }

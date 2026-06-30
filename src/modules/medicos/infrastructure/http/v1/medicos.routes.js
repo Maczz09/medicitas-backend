@@ -60,6 +60,7 @@ router.post('/', verifyToken, requireRole('Auditor'), controller.createMedico);
  *         description: Resultado de disponibilidad
  */
 router.get('/:id/disponibilidad', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), controller.getDisponibilidad);
+router.get('/:id/slots', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), controller.getSlotsForDate);
 router.post('/:id/horarios', verifyToken, requireRole('Médico', 'Auditor'), controller.registrarHorarios);
 router.post('/:id/bloqueos', verifyToken, requireRole('Médico', 'Auditor'), controller.registrarBloqueo);
 

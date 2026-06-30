@@ -168,4 +168,18 @@ router.get( '/:idPaciente/encuentros', requireRole('Médico', 'Auditor'), contro
  */
 router.post('/:idPaciente/encuentros', requireRole('Médico', 'Auditor'), controller.registrarEncuentro);
 
+router.patch('/:idPaciente/expediente', requireRole('Médico', 'Recepcionista', 'Auditor'), async (req, res, next) => {
+  try {
+    const { grupoSanguineo, alergias } = req.body;
+    const existente = await expRepo.findByIdPaciente(req.params.idPaciente);
+    if (!existente) {
+      throw new DomainError('EXPEDIENTE_NO_ENCONTRADO', `Sin expediente para paciente ${req.params.idPaciente}`, 404);
+    }
+    await expRepo.update(req.params.idPaciente, { grupoSanguineo, alergias });
+    res.json({ data: { idPaciente: req.params.idPaciente, grupoSanguineo, alergias } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

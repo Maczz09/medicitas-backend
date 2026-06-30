@@ -60,7 +60,7 @@ class HistoriaClinicaController {
           diagnosticoCie10,
           descripcion:     descripcion || null,
           prescripciones:  prescripciones || [],
-          idMedico:        req.user.sub,
+          idMedico:        req.user.idMedico || req.user.sub,
           rolUsuario:      req.user.rolNombre,
           idUsuario:       req.user.sub,
         },

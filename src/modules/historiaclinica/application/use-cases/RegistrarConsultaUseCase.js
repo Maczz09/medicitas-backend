@@ -101,6 +101,11 @@ class RegistrarConsultaUseCase {
 
       await conn.commit();
 
+      // Best-effort: mover la cita a Completada. El encuentro ya está guardado.
+      this.citaValidator.completarCita(dto.idCita).catch((err) => {
+        console.warn(`[HCL] No se pudo completar cita ${dto.idCita}: ${err.message}`);
+      });
+
       return {
         idEncuentro,
         idExpediente: expediente.id,

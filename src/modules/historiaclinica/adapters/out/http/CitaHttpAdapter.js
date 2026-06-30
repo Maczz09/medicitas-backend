@@ -8,6 +8,18 @@ class CitaHttpAdapter {
     this.internalToken = process.env.INTERNAL_SERVICE_TOKEN?.trim();
   }
 
+  async completarCita(idCita) {
+    const { data } = await axios.patch(
+      `${this.baseUrl}/api/v1/citas/${idCita}/completar`,
+      {},
+      {
+        headers: { Authorization: `Bearer ${this.internalToken}` },
+        timeout: 3000,
+      }
+    );
+    return data;
+  }
+
   async obtenerEstadoCita(idCita) {
     try {
       const { data } = await axios.get(

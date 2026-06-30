@@ -8,46 +8,42 @@ class EncuentroMySQLRepository {
   async findPaginadoByExpediente(idExpediente, { pagina, porPagina }) {
     const conn = await this.pool.getConnection();
     try {
-      const limit = parseInt(porPagina, 10);
+      const limit  = parseInt(porPagina, 10);
       const offset = (parseInt(pagina, 10) - 1) * limit;
 
-      const [rows] = await conn.execute(`
-        SELECT SQL_CALC_FOUND_ROWS 
-          e.id_encuentro AS idEncuentro,
-          e.id_cita AS idCita,
-          e.id_medico AS idMedico,
-          e.fecha_hora AS fecha,
-          e.diagnostico_cie10 AS diagnosticoCie10,
-          e.diagnostico_descripcion AS descripcion
-        FROM svc_hcl.encuentros_clinicos e
-        WHERE e.id_expediente = ?
-        ORDER BY e.fecha_hora DESC
-        LIMIT ? OFFSET ?
-      `, [idExpediente, limit, offset]);
+      const [[{ total }]] = await conn.query(
+        'SELECT COUNT(*) AS total FROM svc_hcl.encuentros_clinicos WHERE id_expediente = ?',
+        [idExpediente],
+      );
 
-      const [[{ total }]] = await conn.query(`SELECT FOUND_ROWS() as total`);
+      const [rows] = await conn.query(
+        `SELECT
+           id_encuentro            AS idEncuentro,
+           id_cita                 AS idCita,
+           id_medico               AS idMedico,
+           fecha_hora              AS fecha,
+           diagnostico_cie10       AS diagnosticoCie10,
+           diagnostico_descripcion AS descripcion
+         FROM svc_hcl.encuentros_clinicos
+         WHERE id_expediente = ?
+         ORDER BY fecha_hora DESC
+         LIMIT ${limit} OFFSET ${offset}`,
+        [idExpediente],
+      );
 
-      // Para cada encuentro, traer prescripciones
       const encuentros = await Promise.all(rows.map(async (enc) => {
-        const [prescs] = await conn.execute(`
-          SELECT id_prescripcion as id, medicamento, dosis, frecuencia, duracion, indicaciones 
-          FROM svc_hcl.prescripciones_clinicas 
-          WHERE id_encuentro = ?
-        `, [enc.idEncuentro]);
-
-        return {
-          ...enc,
-          prescripciones: prescs
-        };
+        const [prescs] = await conn.query(
+          `SELECT id_prescripcion AS id, medicamento, dosis, frecuencia, duracion, indicaciones
+           FROM svc_hcl.prescripciones_clinicas
+           WHERE id_encuentro = ?`,
+          [enc.idEncuentro],
+        );
+        return { ...enc, prescripciones: prescs };
       }));
 
-      return {
-        total,
-        pagina: parseInt(pagina, 10),
-        porPagina: limit,
-        encuentros
-      };
+      return { total, pagina: parseInt(pagina, 10), porPagina: limit, encuentros };
     } catch (err) {
+      console.error('[EncuentroRepo] findPaginadoByExpediente error:', err.message);
       throw new DomainError('ERROR_INTERNO_HCL', 'Error al consultar encuentros clínicos', 500);
     } finally {
       conn.release();

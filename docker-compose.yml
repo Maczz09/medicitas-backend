@@ -73,6 +73,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      TZ: America/Lima
       NODE_ENV: ${NODE_ENV}
       PORT: 3000
       MYSQL_HOST: mysql
@@ -124,6 +125,7 @@ services:
     container_name: medicitas_workers
     restart: unless-stopped
     environment:
+      TZ: America/Lima
       NODE_ENV: ${NODE_ENV}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
