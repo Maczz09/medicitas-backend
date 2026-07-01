@@ -49,6 +49,18 @@ app.use(metricsMiddleware);
 app.use(correlationMiddleware);
 app.use(checkIdempotency);
 
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Healthcheck del sistema
+ *     description: Endpoint para verificar que el servicio está vivo y responde. Usado por balanceadores de carga y el autoheal.
+ *     tags:
+ *       - Infraestructura
+ *     responses:
+ *       200:
+ *         description: El servicio está operando correctamente
+ */
 // Endpoint de salud (Heartbeat) para Docker Healthcheck
 app.get('/health', (req, res) => res.status(200).json({ status: 'OK', timestamp: new Date() }));
 

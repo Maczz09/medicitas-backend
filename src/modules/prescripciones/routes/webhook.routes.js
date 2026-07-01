@@ -49,11 +49,17 @@ const router = express.Router();
  *                 enum: [RETIRADA, RECHAZADA, DESPACHADA]
  *               referenciaFarmacia:
  *                 type: string
- *               motivoRechazo:
+ *               observacion:
  *                 type: string
  *     responses:
  *       200:
  *         description: Webhook procesado exitosamente
+ *       400:
+ *         description: Parámetros inválidos
+ *       401:
+ *         description: No autorizado (Falta API Key o es inválida)
+ *       500:
+ *         description: Error interno del servidor
  */
 router.post('/farmacia', verifyApiKey, async (req, res, next) => {
   try {

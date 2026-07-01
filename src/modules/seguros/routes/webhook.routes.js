@@ -31,6 +31,38 @@ const verifyApiKey = (req, res, next) => {
   next();
 };
 
+/**
+ * @swagger
+ * /api/v1/webhooks/seguros:
+ *   post:
+ *     summary: Webhook de Aseguradora (Actualización de póliza)
+ *     description: Recibe el cambio de estado de una póliza desde la aseguradora para sincronizar internamente la base de datos de coberturas. Requiere X-Api-Key.
+ *     tags: [Webhooks]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - numeroPoliza
+ *               - estado
+ *             properties:
+ *               numeroPoliza:
+ *                 type: string
+ *               estado:
+ *                 type: string
+ *                 enum: [VIGENTE, SUSPENDIDA, CANCELADA]
+ *     responses:
+ *       200:
+ *         description: Estado actualizado exitosamente en el sistema de MediCitas
+ *       401:
+ *         description: API Key inválida
+ *       500:
+ *         description: Error interno del servidor
+ */
 router.post(
   '/',
   verifyApiKey,
