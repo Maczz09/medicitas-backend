@@ -112,6 +112,11 @@ services:
       - medicitas_shared_net
     expose:
       - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     volumes:
       # Volúmenes para desarrollo (hot-reloading)
       - ./src:/app/src
@@ -251,6 +256,16 @@ services:
       - nginx
     networks:
       - medicitas_net
+
+  # ─── AUTOHEAL (Monitor de contenedores) ──────────────────
+  autoheal:
+    image: willfarrell/autoheal
+    container_name: medicitas_autoheal
+    restart: always
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=all
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   mysql_data:

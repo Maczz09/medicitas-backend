@@ -49,6 +49,9 @@ app.use(metricsMiddleware);
 app.use(correlationMiddleware);
 app.use(checkIdempotency);
 
+// Endpoint de salud (Heartbeat) para Docker Healthcheck
+app.get('/health', (req, res) => res.status(200).json({ status: 'OK', timestamp: new Date() }));
+
 // Endpoint de métricas para Prometheus (solo accesible internamente)
 app.get('/metrics', async (req, res) => {
   try {
