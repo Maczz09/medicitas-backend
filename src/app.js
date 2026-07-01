@@ -20,6 +20,8 @@ const preRouter = require('./modules/prescripciones/routes/prescripciones.routes
 const facRouter = require('./modules/facturacion/routes/facturacion.routes');
 const audRouter = require('./modules/auditoria/routes/auditoria.routes');
 const notRouter     = require('./modules/notificaciones/routes/notificaciones.routes');
+const webhookRouter = require('./modules/prescripciones/routes/webhook.routes');
+const segurosWebhookRouter = require('./modules/seguros/routes/webhook.routes');
 const twilioWebhook = require('./shared/infrastructure/webhooks/twilio.webhook');
 
 const app = express();
@@ -70,6 +72,10 @@ app.use('/api/v1/prescripciones', preRouter);
 app.use('/api/v1/facturacion', facRouter);
 app.use('/api/v1/auditoria', audRouter);
 app.use('/api/v1/notificaciones', notRouter);
+
+// Webhooks internos (protegidos por API KEY en su propia ruta)
+app.use('/api/v1/webhooks', webhookRouter); // El de prescripciones
+app.use('/api/v1/webhooks/seguros', segurosWebhookRouter);
 
 // Webhooks externos (sin rate-limit ni auth — validados por firma Twilio)
 app.use('/webhooks/twilio', twilioWebhook);

@@ -42,21 +42,18 @@ class FacturacionConsumer {
         this.channel.ack(msg);
 
       } catch (err) {
-        const deliveryCount = msg.properties.headers?.['x-delivery-count'] || 0;
+        // En colas clásicas de RabbitMQ, x-delivery-count no existe nativamente
+        // a menos que se use quorum queues. Para simplificar y evitar bucles infinitos a la velocidad
+        // de la luz, introducimos una pausa (backoff) que no bloquee totalmente el thread pero limite la frecuencia.
         logger.error(
-          { err, idPago: evento?.payload?.idPago, deliveryCount },
-          'Error al procesar PagoAprobado en Facturación'
+          { err: err.message, idPago: evento?.payload?.idPago },
+          'Error al procesar PagoAprobado en Facturación. Reencolando con pausa...'
         );
 
-        if (deliveryCount >= MAX_REINTENTOS) {
-          logger.error(
-            { idPago: evento?.payload?.idPago },
-            `Comprobante enviado a DLQ después de ${MAX_REINTENTOS} intentos`
-          );
-          this.channel.nack(msg, false, false); 
-        } else {
-          this.channel.nack(msg, false, true); 
-        }
+        // Simulamos un retraso antes de rechazar el mensaje para evitar saturar el CPU
+        setTimeout(() => {
+          this.channel.nack(msg, false, true); // requeue
+        }, 5000); // 5 segundos de backoff
       }
     });
 

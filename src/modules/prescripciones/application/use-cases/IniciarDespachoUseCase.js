@@ -21,7 +21,12 @@ class IniciarDespachoUseCase {
     }
 
     if (existente) {
-      this.logger.info({ idEvento }, 'PrescripcionEmitida ya procesado anteriormente — ignorado');
+      if (existente.estado === Despacho.ESTADOS.CREADA) {
+        this.logger.info({ idEvento }, 'Despacho CREADO encontrado. Reintentando envío (recovery).');
+        await this._intentarEnvio(existente, existente.contenido, correlationId);
+      } else {
+        this.logger.info({ idEvento, estado: existente.estado }, 'PrescripcionEmitida ya procesado con estado final — ignorado');
+      }
       return;
     }
 
@@ -93,14 +98,8 @@ class IniciarDespachoUseCase {
 
       } else {
         // origenFallo === 'TRANSPORTE': timeout, CB abierto, 5xx, error de config
-        despacho.marcarRechazadaPorValidacion(resultado.motivoRechazo);
-        await this.despachosRepo.actualizarEstado(despacho, conn);
-        await this.eventPublisher.publish(conn, 'RecetaRechazada', {
-          idReceta:     despacho.id,
-          idPaciente:   despacho.idPaciente,
-          motivoRechazo: despacho.motivoRechazo,
-          tipo:         'VALIDACION',
-        }, correlationId);
+        // Lanzamos error para que la transacción se revierta y RabbitMQ reencole el mensaje.
+        throw new Error(`Fallo temporal de transporte hacia farmacia-api: ${resultado.motivoRechazo}`);
       }
 
       await conn.commit();

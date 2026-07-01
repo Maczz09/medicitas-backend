@@ -29,16 +29,12 @@ class PrescripcionesConsumer {
         this.channel.ack(msg);
 
       } catch (err) {
-        const deliveryCount = msg.properties.headers?.['x-delivery-count'] || 0;
-        logger.error({ err: err.message, idEvento: evento?.idEvento, deliveryCount },
-          'Error en consumer de Prescripciones');
+        logger.error({ err: err.message, idEvento: evento?.idEvento },
+          'Error en consumer de Prescripciones. Reencolando con pausa...');
 
-        if (deliveryCount >= MAX_REINTENTOS) {
-          logger.error({ deliveryCount }, 'Evento enviado a DLQ después de máximos reintentos');
-          this.channel.nack(msg, false, false); // → DLQ
-        } else {
+        setTimeout(() => {
           this.channel.nack(msg, false, true); // requeue
-        }
+        }, 5000);
       }
     });
 
