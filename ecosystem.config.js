@@ -11,16 +11,14 @@ module.exports = {
     {
       name: 'worker-tolerancia',
       script: './workers/tolerancia.cron.js',
-      instances: 1,
-      exec_mode: 'cluster',
+      exec_mode: 'fork',
       autorestart: true,
       watch: false
     },
     {
       name: 'worker-alertas-llegada',
       script: './workers/alertas_llegada.cron.js',
-      instances: 1,
-      exec_mode: 'cluster',
+      exec_mode: 'fork',
       autorestart: true,
       watch: false
     }

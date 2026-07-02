@@ -1,4 +1,5 @@
 const express = require('express');
+const { verifyWebhookApiKey } = require('../../../shared/infrastructure/webhooks/verifyWebhookApiKey.middleware');
 const { WebhookController } = require('../adapters/in/WebhookController');
 const { ProcesarWebhookAseguradoraUseCase } = require('../application/use-cases/ProcesarWebhookAseguradoraUseCase');
 const { CoberturasMySQLRepository } = require('../adapters/out/repositories/CoberturasMySQLRepository');
@@ -19,17 +20,6 @@ const procesarWebhookUseCase = new ProcesarWebhookAseguradoraUseCase({
 const controller = new WebhookController({ procesarWebhookUseCase });
 
 const router = express.Router();
-
-// Usaremos un middleware de API Key simple (compartido entre los microservicios)
-const verifyApiKey = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
-  const validKey = process.env.API_KEY || 'test-api-key-12345';
-  
-  if (apiKey !== validKey) {
-    return res.status(401).json({ codigo: 'UNAUTHORIZED', mensaje: 'API Key inválida' });
-  }
-  next();
-};
 
 /**
  * @swagger
@@ -65,7 +55,7 @@ const verifyApiKey = (req, res, next) => {
  */
 router.post(
   '/',
-  verifyApiKey,
+  verifyWebhookApiKey('ASEGURADORA_API_KEY'),
   controller.recibirWebhook
 );
 

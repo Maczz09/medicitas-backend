@@ -19,6 +19,21 @@ const router = Router();
 
 /**
  * @swagger
+ * /api/v1/auditoria/health:
+ *   get:
+ *     summary: Obtener el estado de salud de todos los sistemas
+ *     tags: [Auditoria]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Estado del sistema
+ */
+router.get('/health', verifyToken, requireRole(['AUDITOR','INTERNAL']), controller.getHealth);
+router.post('/whatsapp/unlink', verifyToken, requireRole(['AUDITOR','INTERNAL']), controller.postUnlinkWhatsapp);
+
+/**
+ * @swagger
  * /api/v1/auditoria/trazas:
  *   get:
  *     summary: Consultar trazas con filtros

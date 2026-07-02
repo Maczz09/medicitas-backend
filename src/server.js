@@ -23,6 +23,25 @@ async function bootstrap() {
     await redis.connect();
     await rabbitmq.connect();
 
+    // Setup Realtime SSE Broadcaster
+    const { broadcastEvent } = require('./shared/infrastructure/realtime.routes');
+    const crypto = require('crypto');
+    const realtimeQueueName = `q.realtime.${crypto.randomUUID()}`;
+    const channel = rabbitmq.getChannel();
+    await channel.assertQueue(realtimeQueueName, { exclusive: true, autoDelete: true });
+    await channel.bindQueue(realtimeQueueName, 'medicitas.events', '#');
+    await channel.consume(realtimeQueueName, (msg) => {
+      if (msg !== null) {
+        try {
+          const payload = JSON.parse(msg.content.toString());
+          broadcastEvent(payload.evento || msg.fields.routingKey, payload);
+        } catch (e) {
+          console.error('[Realtime] Error parsing message', e);
+        }
+        channel.ack(msg);
+      }
+    });
+
     // Wiring de dependencias del consumer de Facturación
     const { FacturacionConsumer } = require('./modules/facturacion/consumer/facturacion.consumer');
     const { GenerarComprobanteUseCase } = require('./modules/facturacion/application/use-cases/GenerarComprobanteUseCase');
@@ -66,13 +85,28 @@ async function bootstrap() {
     const { MensajesSMSMySQLRepository } = require('./modules/notificaciones/adapters/out/repositories/MensajesSMSMySQLRepository');
     const { PacienteHttpAdapter: NotificacionesPacienteHttpAdapter }        = require('./modules/notificaciones/adapters/out/http/PacienteHttpAdapter');
     const { OutboxMySQLPublisher: NotificacionesOutboxMySQLPublisher }       = require('./modules/notificaciones/adapters/out/events/OutboxMySQLPublisher');
-    const { TwilioWhatsAppAdapter }      = require('./modules/notificaciones/adapters/out/gateway/TwilioWhatsAppAdapter');
+    const { WhatsappWebJSAdapter }       = require('./modules/notificaciones/adapters/out/gateway/WhatsappWebJSAdapter');
     const { SMSMockAdapter }             = require('./modules/notificaciones/adapters/out/gateway/SMSMockAdapter');
     const { NotificarPacienteUseCase }   = require('./modules/notificaciones/application/use-cases/NotificarPacienteUseCase');
 
-    const gateway = process.env.USE_MOCK_SMS === 'true'
+    // Inicializar el use case de procesar pendientes (se dispara en onReady)
+    const { ProcesarMensajesPendientesUseCase } = require('./modules/notificaciones/application/use-cases/ProcesarMensajesPendientesUseCase');
+    
+    let gateway;
+    const procesarPendientesUseCase = new ProcesarMensajesPendientesUseCase({
+      mensajesSMSRepository: new MensajesSMSMySQLRepository(database),
+      getConnection: async () => await database.getConnection(),
+      getGateway: () => gateway
+    });
+
+    gateway = process.env.USE_MOCK_SMS === 'true'
       ? new SMSMockAdapter()
-      : new TwilioWhatsAppAdapter();
+      : new WhatsappWebJSAdapter(async () => {
+          // Callback cuando WhatsApp Web está listo (vinculado)
+          const logger = require('./shared/logger/logger');
+          logger.info('[Notificaciones] WhatsApp vinculado. Procesando pendientes...');
+          await procesarPendientesUseCase.ejecutar();
+        });
 
     const useCase = new NotificarPacienteUseCase({
       mensajesSMSRepository: new MensajesSMSMySQLRepository(database),

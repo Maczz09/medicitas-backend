@@ -6,3 +6,7 @@ redis_data/
 rabbitmq_data/
 .DS_Store
 *.log
+
+# Sesión de WhatsApp Web.js (Puppeteer/Chrome) — datos de runtime, no código fuente.
+# Contiene archivos especiales (sockets/pipes) que Git no puede indexar en Windows.
+src/.wwebjs_auth/

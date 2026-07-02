@@ -549,3 +549,5 @@ GRANT ALL PRIVILEGES ON svc_not.*         TO 'medicitas_app'@'%';
 GRANT ALL PRIVILEGES ON svc_aud.*         TO 'medicitas_app'@'%';
 GRANT ALL PRIVILEGES ON svc_pre.*         TO 'medicitas_app'@'%';
 FLUSH PRIVILEGES;
+I N S E R T   I N T O   s v c _ f a c . s e r i e s _ c o m p r o b a n t e   ( t i p o ,   u l t i m o )   V A L U E S   ( ' B O L E T A ' ,   0 ) ,   ( ' F A C T U R A ' ,   0 )   O N   D U P L I C A T E   K E Y   U P D A T E   u l t i m o = u l t i m o ;  
+ 

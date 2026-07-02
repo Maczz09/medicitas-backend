@@ -74,6 +74,48 @@ class MensajesSMSMySQLRepository {
     }
   }
 
+  async findByEstado(estado) {
+    const conn = await this.pool.getConnection();
+    try {
+      const [rows] = await conn.execute(
+        `SELECT id_mensaje, id_evento_origen, tipo_evento, id_paciente,
+                telefono_destino, contenido, estado, referencia_gateway,
+                error_msg, intentos, correlation_id, created_at, enviado_en
+         FROM svc_not.mensajes_sms WHERE estado = ?
+         ORDER BY created_at ASC`,
+        [estado]
+      );
+      return rows.map(this._mapear);
+    } catch (err) {
+      throw new DomainError('ERROR_INTERNO_NOT', 500, 'Error al listar SMS por estado');
+    } finally {
+      conn.release();
+    }
+  }
+
+  async update(mensajeSMS) {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.execute(
+        `UPDATE svc_not.mensajes_sms
+         SET estado = ?, referencia_gateway = ?, error_msg = ?, intentos = ?, enviado_en = ?
+         WHERE id_mensaje = ?`,
+        [
+          mensajeSMS.estado,
+          mensajeSMS.referenciaGateway || null,
+          mensajeSMS.errorDetalle || null,
+          mensajeSMS.intentos,
+          mensajeSMS.sentAt || null,
+          mensajeSMS.id
+        ]
+      );
+    } catch (err) {
+      throw new DomainError('ERROR_INTERNO_NOT', 500, 'Error al actualizar SMS');
+    } finally {
+      conn.release();
+    }
+  }
+
   _mapear(r) {
     return new MensajeSMS({
       id:                r.id_mensaje,

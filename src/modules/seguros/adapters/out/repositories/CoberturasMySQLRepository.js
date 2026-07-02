@@ -73,6 +73,33 @@ class CoberturasMySQLRepository {
     }
   }
 
+  // Actualiza una validación puntual por id — usado por el webhook de aseguradora
+  // cuando el payload trae idValidacion (correlación exacta con una fila).
+  // Recibe la conexión de la transacción activa del caller.
+  async actualizarPorId(id, nuevoEstado, connection) {
+    const [result] = await connection.execute(
+      `UPDATE svc_seg.validaciones_cobertura
+       SET estado_cobertura = ?
+       WHERE id = ? AND estado_cobertura != ?`,
+      [nuevoEstado, id, nuevoEstado]
+    );
+    return result.affectedRows;
+  }
+
+  // Fallback cuando el webhook de aseguradora no trae idValidacion: actualiza
+  // todas las validaciones asociadas a la póliza que no tengan ya ese estado.
+  // Más amplio que actualizarPorId — usar solo cuando no hay forma de acotar
+  // a un registro específico.
+  async actualizarPorPoliza(numeroPoliza, nuevoEstado, connection) {
+    const [result] = await connection.execute(
+      `UPDATE svc_seg.validaciones_cobertura
+       SET estado_cobertura = ?
+       WHERE numero_poliza = ? AND estado_cobertura != ?`,
+      [nuevoEstado, numeroPoliza, nuevoEstado]
+    );
+    return result.affectedRows;
+  }
+
   async findById(id) {
     const conn = await this.pool.getConnection();
     try {

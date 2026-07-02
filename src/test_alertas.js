@@ -1,5 +1,5 @@
-const cron = require('node-cron');
-const db   = require('../src/config/database');
+require('dotenv').config();
+const db = require('../src/config/database');
 const crypto = require('crypto');
 
 function fmtHora(fecha) {
@@ -8,64 +8,17 @@ function fmtHora(fecha) {
 
 async function publicarEvento(conn, tipoEvento, idCita, payload) {
   const idEvento = crypto.randomUUID();
-  const correlationId = crypto.randomUUID(); // Simplificado para cron
+  const correlationId = crypto.randomUUID();
   
   await conn.execute(
-    `INSERT INTO svc_cit.outbox (id, evento, payload, correlation_id)
+    `INSERT INTO svc_cit.outbox (id_evento, tipo_evento, payload, correlation_id)
      VALUES (?, ?, ?, ?)`,
     [idEvento, tipoEvento, JSON.stringify(payload), correlationId]
   );
 }
 
-async function processRecordatorios30m() {
-  const now = new Date();
-  const startTarget = new Date(now.getTime() + 28 * 60000);
-  const endTarget   = new Date(now.getTime() + 32 * 60000);
-
-  const [citas] = await db.query(
-    `SELECT c.id, c.id_paciente, c.id_medico, c.fecha_hora, c.especialidad,
-            CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
-            p.telefono AS paciente_telefono,
-            CONCAT('Dr. ', m.nombre, ' ', m.apellido) AS medico_nombre
-     FROM svc_cit.citas c
-     LEFT JOIN svc_pac.pacientes p ON p.id_paciente = c.id_paciente
-     LEFT JOIN svc_med.medicos m ON m.id_medico = c.id_medico
-     WHERE c.estado = 'Pendiente'
-       AND c.recordatorio_30m = 0
-       AND c.fecha_hora BETWEEN ? AND ?`,
-    [now, endTarget]
-  );
-
-  for (const cita of citas) {
-    const conn = await db.getConnection();
-    await conn.beginTransaction();
-    try {
-      await conn.execute('UPDATE svc_cit.citas SET recordatorio_30m = 1 WHERE id = ?', [cita.id]);
-
-      await publicarEvento(conn, 'Recordatorio30m', cita.id, {
-        idCita: cita.id,
-        idPaciente: cita.id_paciente,
-        pacienteTelefono: cita.paciente_telefono,
-        pacienteNombre: cita.paciente_nombre,
-        medicoNombre: cita.medico_nombre,
-        especialidad: cita.especialidad,
-        fechaHora: cita.fecha_hora
-      });
-
-      await conn.commit();
-      console.log(`[AlertasLlegada] Recordatorio 30min encolado — cita ${cita.id}`);
-    } catch (err) {
-      await conn.rollback();
-      console.error(`[AlertasLlegada] Error recordatorio 30min cita ${cita.id}:`, err.message);
-    } finally {
-      conn.release();
-    }
-  }
-}
-
-async function processAlertasYExpiracion() {
-  const now = new Date();
-  
+async function run() {
+  console.log('Fetching citas for alertas...');
   const [citas] = await db.query(
     `SELECT c.id, c.id_paciente, c.id_medico, c.fecha_hora, c.especialidad, c.correlation_id,
             c.alerta_min0, c.alerta_min5, c.alerta_min10,
@@ -76,14 +29,16 @@ async function processAlertasYExpiracion() {
      LEFT JOIN svc_pac.pacientes p ON p.id_paciente = c.id_paciente
      LEFT JOIN svc_med.medicos m ON m.id_medico = c.id_medico
      WHERE c.estado = 'Pendiente'
-       AND c.fecha_hora <= ?`,
-    [now]
+       AND c.fecha_hora <= NOW()`
   );
 
+  console.log(`Found ${citas.length} citas.`);
+  
   for (const cita of citas) {
+    console.log(`Processing cita ${cita.id}`);
     const diffMin = Math.floor((Date.now() - new Date(cita.fecha_hora).getTime()) / 60000);
     const hora    = fmtHora(cita.fecha_hora);
-    console.log(`[DEBUG] Cita ${cita.id} | fecha_hora: ${cita.fecha_hora} | diffMin: ${diffMin} | Date.now(): ${new Date()} | parsed: ${new Date(cita.fecha_hora)}`);
+    console.log(`diffMin is ${diffMin}`);
 
     const conn = await db.getConnection();
     await conn.beginTransaction();
@@ -154,26 +109,12 @@ async function processAlertasYExpiracion() {
       }
     } catch (err) {
       await conn.rollback();
-      console.error(`[AlertasLlegada] Error cita ${cita.id}:`, err.message);
+      console.error(`[AlertasLlegada] Error cita ${cita.id}:`, err);
     } finally {
       conn.release();
     }
   }
+  process.exit(0);
 }
 
-async function runCrons() {
-  try {
-    await Promise.all([
-      processRecordatorios30m(),
-      processAlertasYExpiracion(),
-    ]);
-  } catch (err) {
-    console.error('[AlertasLlegada] Error general:', err.message);
-  }
-}
-
-// Ejecutar inmediatamente y luego cada minuto (60000ms)
-runCrons();
-setInterval(runCrons, 60000);
-
-console.log('[Worker] Alertas Llegada cron iniciado (cada minuto, enviando a Outbox).');
+run();

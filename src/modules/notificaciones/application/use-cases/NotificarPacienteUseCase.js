@@ -79,23 +79,39 @@ class NotificarPacienteUseCase {
         'SMS enviado correctamente');
 
     } catch (err) {
-      // ── 5b. Fallo en gateway: construir entidad FALLIDO ─────────────────────
-      mensajeSMS = MensajeSMS.crearFallido({
-        idEvento, tipoEvento, idPaciente, telefono,
-        mensaje:      mensajeTexto,
-        errorDetalle: err.message,
-        correlationId,
-      });
-      eventoPublicar = 'SMSFallido';
-      payloadEvento  = {
-        idMensaje:      mensajeSMS.id,
-        idEventoOrigen: idEvento,
-        tipoEvento,
-        idPaciente,
-        errorDetalle:   err.message,
-      };
-
-      logger.warn({ tipoEvento, idPaciente, error: err.message }, 'SMS fallido');
+      if (err.name === 'WhatsAppNotLinkedError') {
+        // ── 5b. WhatsApp no vinculado: PENDIENTE_VINCULACION ─────────────────────
+        mensajeSMS = MensajeSMS.crearPendienteVinculacion({
+          idEvento, tipoEvento, idPaciente, telefono,
+          mensaje:      mensajeTexto,
+          correlationId,
+        });
+        eventoPublicar = 'SMSPendienteVinculacion';
+        payloadEvento  = {
+          idMensaje:      mensajeSMS.id,
+          idEventoOrigen: idEvento,
+          tipoEvento,
+          idPaciente,
+        };
+        logger.warn({ tipoEvento, idPaciente }, 'WhatsApp no vinculado. Mensaje encolado.');
+      } else {
+        // ── 5c. Fallo real en gateway: construir entidad FALLIDO ─────────────────
+        mensajeSMS = MensajeSMS.crearFallido({
+          idEvento, tipoEvento, idPaciente, telefono,
+          mensaje:      mensajeTexto,
+          errorDetalle: err.message,
+          correlationId,
+        });
+        eventoPublicar = 'SMSFallido';
+        payloadEvento  = {
+          idMensaje:      mensajeSMS.id,
+          idEventoOrigen: idEvento,
+          tipoEvento,
+          idPaciente,
+          errorDetalle:   err.message,
+        };
+        logger.warn({ tipoEvento, idPaciente, error: err.message }, 'SMS fallido');
+      }
     }
 
     // ── 6. TX: INSERT mensajes_sms + INSERT outbox ────────────────────────────

@@ -8,10 +8,10 @@ class ProcesarWebhookAseguradoraUseCase {
   }
 
   async ejecutar(payload, correlationId) {
-    const { numeroPoliza, estadoAnterior, nuevoEstado, fechaActualizacion } = payload;
+    const { idValidacion, numeroPoliza, estadoAnterior, nuevoEstado, fechaActualizacion } = payload;
 
     logger.info(
-      { numeroPoliza, nuevoEstado, correlationId },
+      { idValidacion, numeroPoliza, nuevoEstado, correlationId },
       '[ProcesarWebhookAseguradoraUseCase] Procesando webhook de cambio de estado de póliza'
     );
 
@@ -19,39 +19,39 @@ class ProcesarWebhookAseguradoraUseCase {
     await conn.beginTransaction();
 
     try {
-      // 1. Buscar todas las coberturas_consultas recientes de esta póliza que estén vigentes o pendientes
-      // En una arquitectura real, tendríamos un repositorio específico o query.
-      // Vamos a ejecutar un UPDATE masivo en coberturas_consultas para marcar el nuevo estado.
-      // Nota: coberturas_consultas guarda un historial. 
-      // Si la póliza se suspendió, marcamos las vigentes asociadas a esa póliza como el nuevoEstado.
-      
-      const [result] = await conn.execute(
-        `UPDATE svc_seg.validaciones_cobertura 
-         SET estado_cobertura = ?
-         WHERE numero_poliza = ? 
-           AND estado_cobertura != ?`,
-        [nuevoEstado, numeroPoliza, nuevoEstado]
-      );
+      // Si el webhook trae idValidacion, se actualiza esa fila puntual (más
+      // seguro). Si no, se cae al fallback por numeroPoliza, que puede afectar
+      // varias validaciones históricas de la misma póliza.
+      const affectedRows = idValidacion
+        ? await this.coberturaRepo.actualizarPorId(idValidacion, nuevoEstado, conn)
+        : await this.coberturaRepo.actualizarPorPoliza(numeroPoliza, nuevoEstado, conn);
 
       logger.info(
-        { numeroPoliza, actualizadas: result.affectedRows, correlationId },
+        { idValidacion, numeroPoliza, actualizadas: affectedRows, correlationId },
         '[ProcesarWebhookAseguradoraUseCase] Validaciones locales actualizadas'
       );
 
-      // 2. Emitir evento asíncrono para que otros módulos (como Citas) puedan reaccionar
-      await this.eventPublisher.publish(conn, 'CoberturaActualizadaPorWebhook', {
-        numeroPoliza,
-        estadoAnterior,
-        nuevoEstado,
-        fechaActualizacion,
-        registrosAfectados: result.affectedRows
-      }, correlationId);
+      // Solo publicar el evento si realmente hubo un cambio — evita eventos
+      // duplicados/ruido aguas abajo (notificaciones, auditoría) cuando el
+      // webhook es un reenvío o no encontró filas que actualizar.
+      if (affectedRows > 0) {
+        await this.eventPublisher.publish(conn, 'CoberturaActualizadaPorWebhook', {
+          idValidacion: idValidacion || null,
+          numeroPoliza,
+          estadoAnterior,
+          nuevoEstado,
+          fechaActualizacion,
+          registrosAfectados: affectedRows,
+        }, correlationId);
+      }
 
       await conn.commit();
+
+      return { mensaje: 'Webhook procesado correctamente', registrosAfectados: affectedRows };
     } catch (err) {
       await conn.rollback();
       logger.error(
-        { err, numeroPoliza, correlationId },
+        { err, idValidacion, numeroPoliza, correlationId },
         '[ProcesarWebhookAseguradoraUseCase] Error procesando webhook de aseguradora'
       );
       throw err;

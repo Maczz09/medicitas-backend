@@ -23,8 +23,10 @@ const notRouter     = require('./modules/notificaciones/routes/notificaciones.ro
 const webhookRouter = require('./modules/prescripciones/routes/webhook.routes');
 const segurosWebhookRouter = require('./modules/seguros/routes/webhook.routes');
 const twilioWebhook = require('./shared/infrastructure/webhooks/twilio.webhook');
+const { realtimeRouter } = require('./shared/infrastructure/realtime.routes');
 
 const app = express();
+app.set('trust proxy', 1);
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -87,9 +89,10 @@ app.use('/api/v1/prescripciones', preRouter);
 app.use('/api/v1/facturacion', facRouter);
 app.use('/api/v1/auditoria', audRouter);
 app.use('/api/v1/notificaciones', notRouter);
+app.use('/api/v1/realtime', realtimeRouter);
 
-// Webhooks internos (protegidos por API KEY en su propia ruta)
-app.use('/api/v1/webhooks', webhookRouter); // El de prescripciones
+// Webhooks entrantes de servicios externos (farmacia-api, aseguradora-api) — protegidos por API Key compartida
+app.use('/api/v1/webhooks/farmacia', webhookRouter);
 app.use('/api/v1/webhooks/seguros', segurosWebhookRouter);
 
 // Webhooks externos (sin rate-limit ni auth — validados por firma Twilio)

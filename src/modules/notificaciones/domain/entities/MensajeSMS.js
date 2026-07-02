@@ -3,6 +3,7 @@ const { DomainError } = require('../../../../shared/domain/errors');
 const EstadoSMS = Object.freeze({
   ENVIADO: 'ENVIADO',
   FALLIDO: 'FALLIDO',
+  PENDIENTE_VINCULACION: 'PENDIENTE_VINCULACION'
 });
 
 class MensajeSMS {
@@ -47,8 +48,30 @@ class MensajeSMS {
     });
   }
 
+  static crearPendienteVinculacion({ idEvento, tipoEvento, idPaciente, telefono, mensaje, correlationId }) {
+    return new MensajeSMS({
+      id:           require('crypto').randomUUID(),
+      idEvento, tipoEvento, idPaciente, telefono, mensaje,
+      estado:       EstadoSMS.PENDIENTE_VINCULACION,
+      correlationId,
+    });
+  }
+
+  marcarComoEnviado(referenciaGateway) {
+    this.estado = EstadoSMS.ENVIADO;
+    this.referenciaGateway = referenciaGateway;
+    this.sentAt = new Date();
+    this.errorDetalle = null;
+  }
+
+  marcarComoFallido(errorDetalle) {
+    this.estado = EstadoSMS.FALLIDO;
+    this.errorDetalle = errorDetalle;
+  }
+
   estaEnviado() { return this.estado === EstadoSMS.ENVIADO; }
   estaFallido() { return this.estado === EstadoSMS.FALLIDO; }
+  estaPendienteVinculacion() { return this.estado === EstadoSMS.PENDIENTE_VINCULACION; }
 }
 
 module.exports = { MensajeSMS, EstadoSMS };

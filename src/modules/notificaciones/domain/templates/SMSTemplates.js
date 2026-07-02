@@ -24,10 +24,25 @@ const PLANTILLAS = Object.freeze({
     `MediCitas: Su cita fue reprogramada para el ${_fecha(fechaNueva)} a las ${_hora(fechaNueva)}.`,
 
   CitaExpirada: ({ fechaHoraCita }) =>
-    `MediCitas: Su cita del ${_fecha(fechaHoraCita)} fue cancelada por inasistencia. Contáctenos para reagendar.`,
+    `MediCitas: Su cita del ${_fecha(fechaHoraCita)} fue cancelada por inasistencia al superar los 15 min de tolerancia. Contáctenos al +51 1 234-5678 para reagendar.`,
 
-  AlertaRetraso: ({ minutoAlerta, minutosRestantes }) =>
-    `MediCitas: Su cita ya comenzó hace ${minutoAlerta} min. Tiene ${minutosRestantes} min para presentarse.`,
+  Recordatorio30m: ({ fechaHora, especialidad, pacienteNombre, medicoNombre }) =>
+    `📅 Recordatorio Medicitas — Hola ${pacienteNombre}, tienes una cita con ${medicoNombre} (${especialidad}) ` +
+    `HOY ${_fecha(fechaHora)} a las ${_hora(fechaHora)}. ` +
+    `Por favor llega con 10 minutos de anticipación y trae tu documento de identidad.`,
+
+  AlertaRetraso: ({ minutoAlerta, pacienteNombre, medicoNombre, hora }) => {
+    if (minutoAlerta === 0) {
+      return `🔔 Medicitas — ${pacienteNombre}, tu cita con ${medicoNombre} acaba de comenzar a las ${hora}. Dirígete a la recepción de inmediato. Tienes 15 minutos de tolerancia.`;
+    }
+    if (minutoAlerta === 5) {
+      return `⚠️ Medicitas — ${pacienteNombre}, han pasado 5 minutos desde tu cita con ${medicoNombre} (${hora}). Tienes 10 minutos más de tolerancia antes del cierre. ¡Date prisa!`;
+    }
+    if (minutoAlerta === 10) {
+      return `⚠️ Medicitas — ${pacienteNombre}, ya van 10 minutos desde tu cita con ${medicoNombre} (${hora}). Solo te quedan 5 minutos antes de que sea marcada como NO ASISTIDA. Por favor, preséntate de inmediato.`;
+    }
+    return `MediCitas: Su cita ya comenzó hace ${minutoAlerta} min. Tiene tolerancia restante.`;
+  },
 
   PagoAprobado: ({ montoCopago, tipoComprobante }) =>
     `MediCitas: Pago de S/ ${Number(montoCopago).toFixed(2)} confirmado. Su ${tipoComprobante?.toLowerCase() || 'comprobante'} será enviado pronto.`,

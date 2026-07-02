@@ -1,13 +1,6 @@
 const express = require('express');
 
-const verifyApiKey = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'] || req.query.apiKey;
-  const validKey = process.env.API_KEY || 'test-api-key-12345'; // Asegurarse de usar la clave compartida
-  if (!apiKey || apiKey !== validKey) {
-    return res.status(401).json({ mensaje: 'No autorizado: API Key inválida o ausente' });
-  }
-  next();
-};
+const { verifyWebhookApiKey } = require('../../../shared/infrastructure/webhooks/verifyWebhookApiKey.middleware');
 const ProcesarWebhookFarmaciaUseCase = require('../application/use-cases/ProcesarWebhookFarmaciaUseCase');
 const DespachosMySQLRepository = require('../adapters/out/DespachosMySQLRepository');
 const OutboxEventPublisher = require('../adapters/out/OutboxEventPublisher');
@@ -61,7 +54,7 @@ const router = express.Router();
  *       500:
  *         description: Error interno del servidor
  */
-router.post('/farmacia', verifyApiKey, async (req, res, next) => {
+router.post('/', verifyWebhookApiKey('FARMACIA_API_KEY'), async (req, res, next) => {
   try {
     const { idReceta, estado, referenciaFarmacia, motivoRechazo } = req.body;
     if (!idReceta || !estado) {
