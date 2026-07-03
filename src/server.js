@@ -3,6 +3,25 @@
 require('./tracing');
 
 require('dotenv').config();
+
+// Red de seguridad global: whatsapp-web.js/Puppeteer tiene un race condition
+// conocido ("ProtocolError: Execution context was destroyed") que lanza una
+// promesa rechazada sin capturar durante Client.inject() — sin este handler,
+// Node terminaba el proceso COMPLETO por un fallo interno de una sola
+// dependencia opcional (WhatsApp), tumbando también la API HTTP y los
+// consumers de RabbitMQ que no tienen nada que ver. Se loguea y se continúa;
+// WhatsappWebJSAdapter ya maneja su propio reintento de conexión.
+process.on('unhandledRejection', (reason) => {
+  const logger = require('./shared/logger/logger');
+  logger.error({ err: reason?.message || reason, stack: reason?.stack },
+    '[Proceso] unhandledRejection — el servidor sigue activo');
+});
+process.on('uncaughtException', (err) => {
+  const logger = require('./shared/logger/logger');
+  logger.error({ err: err.message, stack: err.stack },
+    '[Proceso] uncaughtException — el servidor sigue activo');
+});
+
 const app = require('./app');
 const database = require('./config/database');
 const redis = require('./config/redis');

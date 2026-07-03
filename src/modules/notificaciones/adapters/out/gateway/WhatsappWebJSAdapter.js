@@ -59,6 +59,32 @@ class WhatsappWebJSAdapter {
 
     this.onReadyCallback = onReadyCallback;
     this.initClient();
+    this._registrarApagadoGracioso();
+  }
+
+  // Docker manda SIGTERM en `restart`/`stop` y espera ~10s antes de matar el
+  // proceso con SIGKILL. Sin este handler, cada reinicio del contenedor
+  // mataba a Chromium a mitad de una escritura de su perfil (IndexedDB/
+  // LevelDB no son a prueba de crashes) — eso corrompía la sesión vinculada
+  // y forzaba escanear el QR de nuevo en cada rebuild, además de dejar los
+  // locks huérfanos que limpiarLocksHuerfanos() tiene que resolver después.
+  _registrarApagadoGracioso() {
+    if (WhatsappWebJSAdapter._shutdownRegistrado) return;
+    WhatsappWebJSAdapter._shutdownRegistrado = true;
+
+    const cerrar = async (señal) => {
+      logger.info({ señal }, '[WA-Adapter] Cerrando Chromium de forma ordenada antes de salir...');
+      try {
+        if (this.client) await this.client.destroy();
+      } catch (e) {
+        logger.warn({ error: e.message }, '[WA-Adapter] Error cerrando Chromium en apagado gracioso');
+      } finally {
+        process.exit(0);
+      }
+    };
+
+    process.on('SIGTERM', () => cerrar('SIGTERM'));
+    process.on('SIGINT', () => cerrar('SIGINT'));
   }
 
   initClient() {
