@@ -75,6 +75,12 @@ services:
     environment:
       TZ: America/Lima
       NODE_ENV: ${NODE_ENV}
+      # Logs estructurados → Loki (Grafana). Activa pino-loki aunque NODE_ENV=development.
+      LOKI_HOST: http://loki:3100
+      LOKI_APP_LABEL: medicitas-backend
+      # Tracing distribuido → Jaeger
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_SERVICE_NAME: medicitas-backend
       PORT: 3000
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
@@ -132,6 +138,12 @@ services:
     environment:
       TZ: America/Lima
       NODE_ENV: ${NODE_ENV}
+      # Logs estructurados → Loki (Grafana)
+      LOKI_HOST: http://loki:3100
+      LOKI_APP_LABEL: medicitas-workers
+      # Tracing distribuido → Jaeger
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_SERVICE_NAME: medicitas-workers
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER}
@@ -207,7 +219,10 @@ services:
       - medicitas_net
   # ─── LOKI ─────────────────────────────────────────────────
   loki:
-    image: grafana/loki:2.9.4
+    # 2.9.4 tenía un decoder JSON de /loki/api/v1/push demasiado estricto para
+    # el formato que envía pino-loki 3.x — corrompía el batch completo con
+    # "unmarshalerDecoder..." y se perdían los logs. 3.7.x lo acepta bien.
+    image: grafana/loki:3.7.3
     container_name: medicitas_loki
     restart: unless-stopped
     ports:
@@ -215,6 +230,28 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     networks:
       - medicitas_net
+      # Red compartida: permite que farmacia-api y aseguradora-api envíen
+      # sus logs estructurados (pino-loki) directamente a http://loki:3100
+      - medicitas_shared_net
+
+  # ─── JAEGER (Tracing distribuido) ──────────────────────────
+  # all-in-one: collector + query + UI + almacenamiento en memoria.
+  # Suficiente para desarrollo/demo — no persiste entre reinicios.
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: medicitas_jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - medicitas_net
+      # Red compartida: farmacia-api y aseguradora-api envían spans aquí
+      # para que las llamadas S2S aparezcan en el mismo trace distribuido.
+      - medicitas_shared_net
 
   # ─── GRAFANA ──────────────────────────────────────────────
   grafana:

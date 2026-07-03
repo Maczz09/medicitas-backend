@@ -41,18 +41,29 @@ class NotificacionesConsumer {
         this.channel.ack(msg);
 
       } catch (err) {
-        const deliveryCount = msg.properties.headers?.['x-delivery-count'] || 0;
+        // RabbitMQ NO puebla `x-delivery-count` en colas clásicas (solo en
+        // quorum queues) — nack(requeue=true) reencola el mensaje indefinidamente
+        // sin incrementar ningún contador visible, así que el umbral de DLQ nunca
+        // se alcanzaba y un solo mensaje fallido quedaba reintentando por siempre.
+        // Se rastrea el intento con un header propio que viajaba con el mensaje.
+        const intentoActual = (msg.properties.headers?.['x-retry-count'] || 0) + 1;
 
         logger.error(
-          { err: err.message, tipoEvento: evento?.evento, routingKey, deliveryCount },
+          { err: err.message, tipoEvento: evento?.evento, routingKey, intentoActual },
           'Error en consumer de Notificaciones'
         );
 
-        if (deliveryCount >= MAX_REINTENTOS) {
-          logger.error({ routingKey, deliveryCount }, 'SMS enviado a DLQ después de máximos reintentos');
-          this.channel.nack(msg, false, false); // → DLQ
+        if (intentoActual >= MAX_REINTENTOS) {
+          logger.error({ routingKey, intentoActual }, 'SMS enviado a DLQ después de máximos reintentos');
+          this.channel.nack(msg, false, false); // → DLQ (vía dead-letter-exchange de la cola)
         } else {
-          this.channel.nack(msg, false, true); // requeue
+          // No se puede reescribir el header de un mensaje reencolado vía nack;
+          // se ACKea el original y se republica una copia con el contador actualizado.
+          this.channel.ack(msg);
+          this.channel.publish('', QUEUE, msg.content, {
+            persistent: true,
+            headers: { ...msg.properties.headers, 'x-retry-count': intentoActual },
+          });
         }
       }
     });

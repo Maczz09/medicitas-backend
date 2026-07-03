@@ -3,10 +3,37 @@ const qrcode = require('qrcode-terminal');
 const qrcodeLib = require('qrcode');
 const logger = require('../../../../../shared/logger/logger');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
 const STATUS_CALLBACK = process.env.APP_PUBLIC_URL
   ? `${process.env.APP_PUBLIC_URL}/api/v1/webhooks/twilio/status`
   : null;
+
+const WWEBJS_DATA_PATH = './src/.wwebjs_auth';
+
+// El perfil de Chromium de LocalAuth vive en un volumen bind-mounted que
+// sobrevive a recrear el contenedor. Los archivos SingletonLock/Socket/Cookie
+// identifican la instancia de Chromium por PID/hostname del contenedor
+// ANTERIOR — al recrear el contenedor esos PIDs ya no existen, pero Chromium
+// igual detecta el lock "vivo" y se queda colgado esperando resolverlo,
+// nunca emite el evento 'qr'. Se limpian antes de cada arranque.
+function limpiarLocksHuerfanos(dataPath) {
+  const sessionDir = path.join(dataPath, 'session', 'Default');
+  if (!fs.existsSync(sessionDir)) return;
+
+  for (const nombre of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    const p = path.join(sessionDir, nombre);
+    try {
+      if (fs.existsSync(p) || fs.lstatSync(p, { throwIfNoEntry: false })) {
+        fs.rmSync(p, { force: true });
+        logger.warn({ archivo: nombre }, '[WA-Adapter] Lock huérfano de Chromium eliminado antes de arrancar');
+      }
+    } catch {
+      // No debe impedir el arranque si el archivo ya no existe o no se puede borrar
+    }
+  }
+}
 
 function fmtWhatsApp(tel) {
   const digits = tel.replace(/\D/g, '');
@@ -40,8 +67,10 @@ class WhatsappWebJSAdapter {
     this.currentQrDataUri = null;
     this.qrGeneratedAt = null;
 
+    limpiarLocksHuerfanos(WWEBJS_DATA_PATH);
+
     this.client = new Client({
-      authStrategy: new LocalAuth({ dataPath: './src/.wwebjs_auth' }),
+      authStrategy: new LocalAuth({ dataPath: WWEBJS_DATA_PATH }),
       puppeteer: {
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
@@ -121,9 +150,7 @@ class WhatsappWebJSAdapter {
         logger.warn({ error: e.message }, '[WA-Adapter] Error al cerrar navegador');
       }
 
-      const fs = require('fs');
-      const path = require('path');
-      const authPath = path.resolve('./src/.wwebjs_auth');
+      const authPath = path.resolve(WWEBJS_DATA_PATH);
       if (fs.existsSync(authPath)) {
         fs.rmSync(authPath, { recursive: true, force: true });
         logger.info('[WA-Adapter] Sesión borrada exitosamente.');

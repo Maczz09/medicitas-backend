@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
 const logger = require('../../../../../shared/logger/logger');
 
 class CitaHttpAdapter {
@@ -11,13 +12,13 @@ class CitaHttpAdapter {
     try {
       const url = `${this.baseUrl}/api/v1/citas/${idCita}`;
       
-      const response = await axios.get(url, {
+      const response = await conReintentos(() => axios.get(url, {
         headers: {
           'Authorization': `Bearer ${this.internalToken}`,
           'X-Internal-Service': 'true'
         },
         timeout: 5000 // Falla rápido si CITAS no responde
-      });
+      }), {}, logger);
 
       return { estado: response.data.estado };
 

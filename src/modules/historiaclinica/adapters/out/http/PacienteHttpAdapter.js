@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { DomainError } = require('../../../../../shared/domain/errors');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
 
 class PacienteHttpAdapter {
   constructor() {
@@ -9,13 +10,13 @@ class PacienteHttpAdapter {
 
   async existePaciente(idPaciente) {
     try {
-      await axios.get(
+      await conReintentos(() => axios.get(
         `${this.baseUrl}/api/v1/pacientes/${idPaciente}`,
         {
           headers: { Authorization: `Bearer ${this.internalToken}` },
           timeout: 3000,
         }
-      );
+      ));
       return true;
 
     } catch (error) {

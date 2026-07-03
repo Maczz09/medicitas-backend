@@ -17,15 +17,23 @@ class MySQLPacientesRepository {
     return rows[0] || null;
   }
 
-  async searchPaginated({ query, offset, limit }, conn = defaultDb) {
-    // SQL_CALC_FOUND_ROWS optimiza la obtención del total sin tener que hacer otra query igual
+  async searchPaginated({ query, offset, limit, estado = 'activo' }, conn = defaultDb) {
+    // estado: 'activo' (default, preserva el comportamiento previo) | 'inactivo' | 'todos'
+    // Sin este filtro, un paciente desactivado quedaba invisible para siempre —
+    // ni el listado ni la búsqueda lo devolvían, así que no había forma de
+    // encontrarlo de nuevo para reactivarlo.
+    const filtroActivo =
+      estado === 'inactivo' ? 'activo = 0' :
+      estado === 'todos'    ? '1=1' :
+      'activo = 1';
+
     const searchPattern = `%${query || ''}%`;
     const [rows] = await conn.query(
-      `SELECT SQL_CALC_FOUND_ROWS * 
-       FROM svc_pac.pacientes 
-       WHERE activo = 1 AND (
-         nombre LIKE ? OR 
-         apellido LIKE ? OR 
+      `SELECT SQL_CALC_FOUND_ROWS *
+       FROM svc_pac.pacientes
+       WHERE ${filtroActivo} AND (
+         nombre LIKE ? OR
+         apellido LIKE ? OR
          numero_documento LIKE ?
        )
        ORDER BY created_at DESC

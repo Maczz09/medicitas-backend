@@ -43,17 +43,28 @@ class FacturacionConsumer {
 
       } catch (err) {
         // En colas clásicas de RabbitMQ, x-delivery-count no existe nativamente
-        // a menos que se use quorum queues. Para simplificar y evitar bucles infinitos a la velocidad
-        // de la luz, introducimos una pausa (backoff) que no bloquee totalmente el thread pero limite la frecuencia.
+        // (solo en quorum queues) — nack(requeue=true) por sí solo reencola sin
+        // límite real. Se rastrea el intento con un header propio.
+        const intentoActual = (msg.properties.headers?.['x-retry-count'] || 0) + 1;
+
         logger.error(
-          { err: err.message, idPago: evento?.payload?.idPago },
-          'Error al procesar PagoAprobado en Facturación. Reencolando con pausa...'
+          { err: err.message, idPago: evento?.payload?.idPago, intentoActual },
+          'Error al procesar PagoAprobado en Facturación.'
         );
 
-        // Simulamos un retraso antes de rechazar el mensaje para evitar saturar el CPU
-        setTimeout(() => {
-          this.channel.nack(msg, false, true); // requeue
-        }, 5000); // 5 segundos de backoff
+        if (intentoActual >= MAX_REINTENTOS) {
+          logger.error({ idPago: evento?.payload?.idPago, intentoActual }, 'PagoAprobado enviado a DLQ tras máximos reintentos');
+          this.channel.nack(msg, false, false); // → DLQ
+        } else {
+          // Backoff antes de republicar — evita saturar CPU con reintentos inmediatos.
+          setTimeout(() => {
+            this.channel.ack(msg);
+            this.channel.publish('', QUEUE, msg.content, {
+              persistent: true,
+              headers: { ...msg.properties.headers, 'x-retry-count': intentoActual },
+            });
+          }, 5000);
+        }
       }
     });
 

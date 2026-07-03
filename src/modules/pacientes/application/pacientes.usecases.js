@@ -73,18 +73,20 @@ class PacientesUseCases {
   }
 
   async getPaciente(idPaciente) {
-    const paciente = await this.pacientesRepository.findById(idPaciente);
+    // findByIdAny (sin filtro de activo): el detalle de un paciente inactivo
+    // debe poder verse — es la única forma de gestionarlo/reactivarlo.
+    const paciente = await this.pacientesRepository.findByIdAny(idPaciente);
     if (!paciente) throw new PacienteNotFoundError();
     return paciente;
   }
 
-  async listPacientes(query, page = 1, limit = 10) {
+  async listPacientes(query, page = 1, limit = 10, estado = 'activo') {
     if (page < 1 || limit < 1 || limit > 100) {
       throw new PaginationError('Página y límite deben ser positivos. Límite máximo 100.');
     }
     const offset = (page - 1) * limit;
-    
-    const result = await this.pacientesRepository.searchPaginated({ query, offset, limit: parseInt(limit, 10) });
+
+    const result = await this.pacientesRepository.searchPaginated({ query, offset, limit: parseInt(limit, 10), estado });
     const totalPages = Math.ceil(result.total / limit);
 
     return {

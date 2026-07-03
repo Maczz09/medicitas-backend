@@ -1,3 +1,7 @@
+// DEBE ser el primer require: instala los hooks de auto-instrumentación antes
+// de que cualquier módulo (express, mysql2, amqplib) sea cargado por primera vez.
+require('./tracing');
+
 require('dotenv').config();
 const app = require('./app');
 const database = require('./config/database');

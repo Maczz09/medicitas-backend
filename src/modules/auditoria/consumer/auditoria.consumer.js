@@ -2,6 +2,8 @@ const logger = require('../../../shared/logger/logger');
 const { Traza } = require('../domain/entities/Traza');
 const { DomainError } = require('../../../shared/domain/errors');
 
+const MAX_REINTENTOS = parseInt(process.env.AUD_MAX_REINTENTOS || '3');
+
 class AuditoriaConsumer {
   /**
    * @param {import('amqplib').Channel} channel
@@ -42,8 +44,22 @@ class AuditoriaConsumer {
           return;
         }
 
-        logger.error({ err, routingKey }, 'Error al registrar traza. Reintentando.');
-        this.channel.nack(msg, false, true); // requeue
+        // Colas clásicas no pueblan x-delivery-count — se rastrea el intento
+        // con un header propio para no reencolar indefinidamente.
+        const intentoActual = (msg.properties.headers?.['x-retry-count'] || 0) + 1;
+
+        logger.error({ err, routingKey, intentoActual }, 'Error al registrar traza.');
+
+        if (intentoActual >= MAX_REINTENTOS) {
+          logger.error({ routingKey, intentoActual }, 'Traza enviada a DLQ tras máximos reintentos');
+          this.channel.nack(msg, false, false); // → DLQ
+        } else {
+          this.channel.ack(msg);
+          this.channel.publish('', QUEUE, msg.content, {
+            persistent: true,
+            headers: { ...msg.properties.headers, 'x-retry-count': intentoActual },
+          });
+        }
       }
     });
 

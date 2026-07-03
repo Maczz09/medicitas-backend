@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
 const logger = require('../../../../../shared/logger/logger');
 
 class PacienteHttpAdapter {
@@ -9,13 +10,13 @@ class PacienteHttpAdapter {
 
   async obtenerTelefono(idPaciente) {
     try {
-      const { data } = await axios.get(
+      const { data } = await conReintentos(() => axios.get(
         `${this.baseUrl}/api/v1/pacientes/${idPaciente}`,
         {
           headers: { Authorization: `Bearer ${this.internalToken}` },
           timeout: 3000,
         }
-      );
+      ), {}, logger);
       // El endpoint devuelve { data: paciente, correlationId }
       const paciente = data?.data ?? data;
       const telefono = paciente?.telefono?.trim();

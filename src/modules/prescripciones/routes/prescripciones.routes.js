@@ -56,6 +56,57 @@ const controller = new PrescripcionesController({
   marcarRetiradaUseCase
 });
 
+// ── Recovery Replay: cola de despachos pendientes hacia farmacia ──────────────
+// Cuando farmacia-api está caída, los despachos quedan en estado CREADA (la
+// transacción de envío se revierte). Este replay los reenvía automáticamente:
+//   1. Al cerrarse el Circuit Breaker (farmacia volvió a responder).
+//   2. Por sondeo periódico — necesario porque un CB half-open solo se cierra
+//      si alguien dispara una llamada; sin recetas nuevas, nadie lo haría.
+const Despacho = require('../domain/entities/Despacho');
+const logger = require('../../../shared/logger/logger');
+const RECOVERY_LIMIT_FARMACIA = parseInt(process.env.RECOVERY_LIMIT_FARMACIA || '50');
+const REPLAY_FARMACIA_INTERVAL_MS = parseInt(process.env.REPLAY_FARMACIA_INTERVAL_MS || '60000');
+
+let _replayEnCurso = false;
+async function replayDespachosPendientes() {
+  if (_replayEnCurso) return;
+  _replayEnCurso = true;
+  try {
+    const pendientes = await repo.findByEstado(Despacho.ESTADOS.CREADA, RECOVERY_LIMIT_FARMACIA, dbPool);
+    if (pendientes.length === 0) return;
+
+    logger.info({ total: pendientes.length }, '[Prescripciones] Recovery replay: reenviando despachos CREADA a farmacia');
+
+    for (const d of pendientes) {
+      // Sin idEventoOrigen el use case no puede reconocer el despacho existente
+      // y crearía uno nuevo vacío — se omite (caso anómalo, revisar manualmente).
+      if (!d.idEventoOrigen) {
+        logger.warn({ id: d.id }, '[Prescripciones] Replay: despacho CREADA sin idEventoOrigen — omitido');
+        continue;
+      }
+      try {
+        // ejecutar() detecta el despacho existente por idEventoOrigen y, al
+        // estar CREADA, reintenta el envío con el contenido persistido.
+        await iniciarDespachoUseCase.ejecutar({}, d.correlationId, d.idEventoOrigen);
+      } catch (err) {
+        // Falla de transporte individual: el despacho sigue CREADA y se
+        // reintentará en el próximo ciclo — no interrumpe el resto del lote.
+        logger.warn({ id: d.id, err: err.message }, '[Prescripciones] Replay: despacho aún no entregable');
+        // Si el CB volvió a abrirse no tiene sentido seguir con el lote.
+        if (gateway.breaker?.opened) break;
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, '[Prescripciones] Error en recovery replay de despachos');
+  } finally {
+    _replayEnCurso = false;
+  }
+}
+
+gateway.registrarRecuperacion(replayDespachosPendientes);
+const _replayTimer = setInterval(replayDespachosPendientes, REPLAY_FARMACIA_INTERVAL_MS);
+_replayTimer.unref(); // No mantiene vivo el proceso en tests/shutdown
+
 const router = express.Router();
 
 // ── Listado de despachos de receta (admin/auditoría) — paginado ────────────────

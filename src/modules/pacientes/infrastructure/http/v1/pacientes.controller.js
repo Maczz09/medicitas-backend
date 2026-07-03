@@ -6,8 +6,8 @@ const useCases = new PacientesUseCases(repository);
 
 exports.getAll = async (req, res, next) => {
   try {
-    const { q, page, limit } = req.query;
-    const result = await useCases.listPacientes(q, page, limit);
+    const { q, page, limit, estado } = req.query;
+    const result = await useCases.listPacientes(q, page, limit, estado);
     res.status(200).json({ ...result, correlationId: req.correlationId });
   } catch (err) {
     next(err);

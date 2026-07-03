@@ -127,4 +127,44 @@ async function conRetryYFallback(intentarLlamada, circuitoAbierto, respuestaFall
   return respuestaFallback;
 }
 
-module.exports = { conRetryYFallback, esErrorTransitorio, calcularBackoffConJitter };
+/**
+ * Variante sin fallback: reintenta errores transitorios con Full Jitter y,
+ * si se agotan los intentos (o el error no es transitorio), RELANZA el último
+ * error para que el caller conserve su manejo de errores original.
+ *
+ * Pensada para los adaptadores S2S internos (Pacientes, Citas, Coberturas),
+ * cuyos catch distinguen 404 de fallas de red — un fallback fijo rompería
+ * esa semántica.
+ *
+ * @param {Function} intentarLlamada — () => Promise<any>
+ * @param {object}   [opciones]      — { maxIntentos, baseMs, maxMs }
+ * @param {object}   [logger]
+ * @returns {Promise<any>}
+ */
+async function conReintentos(intentarLlamada, opciones = {}, logger) {
+  const {
+    maxIntentos = parseInt(process.env.RETRY_MAX_INTENTOS || '3'),
+    baseMs      = parseInt(process.env.RETRY_BASE_MS      || '200'),
+    maxMs       = parseInt(process.env.RETRY_MAX_MS       || '2000'),
+  } = opciones;
+
+  let ultimoError;
+  for (let intento = 1; intento <= maxIntentos; intento++) {
+    try {
+      return await intentarLlamada();
+    } catch (err) {
+      ultimoError = err;
+      if (!esErrorTransitorio(err) || intento === maxIntentos) throw err;
+
+      const delayMs = calcularBackoffConJitter(intento, baseMs, maxMs);
+      logger?.info(
+        { intento, delayMs: Math.round(delayMs), error: err.message },
+        `Reintento tras fallo transitorio (intento ${intento}/${maxIntentos}).`,
+      );
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  throw ultimoError;
+}
+
+module.exports = { conRetryYFallback, conReintentos, esErrorTransitorio, calcularBackoffConJitter };

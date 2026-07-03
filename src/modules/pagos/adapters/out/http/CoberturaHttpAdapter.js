@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
 const logger = require('../../../../../shared/logger/logger');
 
 class CoberturaHttpAdapter {
@@ -11,13 +12,13 @@ class CoberturaHttpAdapter {
     try {
       const url = `${this.baseUrl}/api/v1/coberturas/${idValidacion}`;
       
-      const response = await axios.get(url, {
+      const response = await conReintentos(() => axios.get(url, {
         headers: {
           'Authorization': `Bearer ${this.internalToken}`,
           'X-Internal-Service': 'true'
         },
         timeout: 5000
-      });
+      }), {}, logger);
 
       return {
         estadoCobertura: response.data.estadoCobertura,

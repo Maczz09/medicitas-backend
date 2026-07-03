@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { DomainError } = require('../../../../../shared/domain/errors');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
 
 class CitaHttpAdapter {
   constructor() {
@@ -9,26 +10,26 @@ class CitaHttpAdapter {
   }
 
   async completarCita(idCita) {
-    const { data } = await axios.patch(
+    const { data } = await conReintentos(() => axios.patch(
       `${this.baseUrl}/api/v1/citas/${idCita}/completar`,
       {},
       {
         headers: { Authorization: `Bearer ${this.internalToken}` },
         timeout: 3000,
       }
-    );
+    ));
     return data;
   }
 
   async obtenerEstadoCita(idCita) {
     try {
-      const { data } = await axios.get(
+      const { data } = await conReintentos(() => axios.get(
         `${this.baseUrl}/api/v1/citas/${idCita}`,
         {
           headers: { Authorization: `Bearer ${this.internalToken}` },
           timeout: 3000,
         }
-      );
+      ));
       // Asumiendo que el endpoint de citas devuelve { data: { estado: ... } }
       const estado = data.data ? data.data.estado : data.estado;
       return { estado };

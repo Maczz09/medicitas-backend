@@ -29,6 +29,13 @@ const { requireRole } = require('../../../../../shared/infrastructure/rbac.middl
  *           type: integer
  *           default: 10
  *         description: Cantidad de resultados por página
+ *       - in: query
+ *         name: estado
+ *         schema:
+ *           type: string
+ *           enum: [activo, inactivo, todos]
+ *           default: activo
+ *         description: Filtra por estado del paciente. Sin este parámetro solo se listan los activos.
  *     responses:
  *       200:
  *         description: Lista paginada de pacientes

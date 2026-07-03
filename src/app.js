@@ -28,11 +28,22 @@ const { realtimeRouter } = require('./shared/infrastructure/realtime.routes');
 const app = express();
 app.set('trust proxy', 1);
 
+// Las llamadas S2S internas (PacienteHttpAdapter, CitaHttpAdapter, etc.) se
+// enrutan por HTTP hacia el propio proceso (localhost:3000/api/v1/...) y
+// pasan por este mismo router — sin este skip, comparten presupuesto con el
+// tráfico público y un pico de eventos en cola (consumers RabbitMQ) puede
+// agotar el límite y devolver 429 en cascada a operaciones internas legítimas.
+function esLlamadaInterna(req) {
+  const token = req.headers.authorization?.replace('Bearer ', '').trim();
+  return !!token && !!process.env.INTERNAL_SERVICE_TOKEN && token === process.env.INTERNAL_SERVICE_TOKEN.trim();
+}
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX || '200'),
   standardHeaders: true,
   legacyHeaders: false,
+  skip: esLlamadaInterna,
   message: { error: 'Demasiadas peticiones. Intenta de nuevo más tarde.' },
 });
 

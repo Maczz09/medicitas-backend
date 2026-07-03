@@ -2,6 +2,7 @@ const axios = require('axios');
 const http  = require('http');
 const https = require('https');
 const { crearCircuitBreakerFarmacia } = require('./circuit-breaker/circuitBreakerFarmaciaConfig');
+const { conRetryYFallback } = require('../../../../../shared/resilience/retryConBackoffJitter');
 const logger = require('../../../../../shared/logger/logger');
 
 /**
@@ -52,14 +53,27 @@ class FarmaciaAxiosAdapter {
   /**
    * Punto de entrada público. Garantiza que NUNCA lanza:
    * - Si breaker.fire() resuelve → forwarda la respuesta.
-   * - Si breaker.fire() rechaza (timeout, CB abierto, 5xx) → mapea a TRANSPORTE.
+   * - Fallos transitorios (timeout, 5xx) → retry con backoff exponencial + Full
+   *   Jitter (misma pirámide de resiliencia que AseguradoraAxiosAdapter).
+   * - Agotados los reintentos o CB abierto → fallback de tipo TRANSPORTE.
+   *
+   * Reintentar el POST es seguro: farmacia-api deduplica por referenciaDespacho
+   * (idempotencia del lado del receptor).
    */
   async enviarReceta({ idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad }) {
-    try {
-      return await this.breaker.fire({ idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad });
-    } catch (err) {
-      return this._mapearFalloATransporte(err);
-    }
+    const datos = { idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad };
+
+    return conRetryYFallback(
+      () => this.breaker.fire(datos),
+      () => this.breaker.opened,
+      this._respuestaFallbackTransporte(),
+      {
+        maxIntentos: parseInt(process.env.RETRY_MAX_INTENTOS || '3'),
+        baseMs:      parseInt(process.env.RETRY_BASE_MS      || '200'),
+        maxMs:       parseInt(process.env.RETRY_MAX_MS       || '2000'),
+      },
+      logger,
+    );
   }
 
   /**
@@ -108,26 +122,19 @@ class FarmaciaAxiosAdapter {
 
     // Cualquier otro status (5xx, etc.) → falla real de disponibilidad.
     // SÍ se suma al porcentaje de fallas del Circuit Breaker.
-    throw new Error(`farmacia-api respondió con estado HTTP inesperado: ${response.status}`);
+    // Se adjunta response.status para que esErrorTransitorio() lo clasifique
+    // como reintentable (los 5xx pueden ser temporales).
+    const err = new Error(`farmacia-api respondió con estado HTTP inesperado: ${response.status}`);
+    err.response = { status: response.status };
+    throw err;
   }
 
-  /**
-   * Convierte cualquier excepción en un resultado de tipo TRANSPORTE.
-   * Distingue entre error de configuración y falla de disponibilidad.
-   */
-  _mapearFalloATransporte(err) {
-    const motivo = err.esErrorDeConfiguracion
-      ? `Error de configuración al llamar a farmacia-api: ${err.message}`
-      : this.breaker.opened
-        ? 'Circuito abierto: farmacia-api no ha respondido de forma consistente.'
-        : `farmacia-api no respondió a tiempo (timeout ${process.env.CB_TIMEOUT_MS_FARMACIA || 5000}ms).`;
-
-    logger.warn({ motivo, cbAbierto: this.breaker.opened }, '[FarmaciaAxiosAdapter] Fallo de transporte — receta no enviada');
-
+  // ── Fallback: devuelto cuando se agotan reintentos o el circuito está abierto
+  _respuestaFallbackTransporte() {
     return {
       aceptada: false,
       referenciaFarmacia: null,
-      motivoRechazo: motivo,
+      motivoRechazo: 'farmacia-api no disponible (timeout, 5xx o circuito abierto) — el despacho queda en cola y se reenviará automáticamente.',
       origenFallo: 'TRANSPORTE',
     };
   }

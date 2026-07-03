@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
 const logger = require('../../../../../shared/logger/logger');
 
 class PacienteHttpAdapter {
@@ -9,12 +10,12 @@ class PacienteHttpAdapter {
 
   async existePaciente(idPaciente) {
     try {
-      await axios.get(`${this.baseURL}/${idPaciente}`, {
+      await conReintentos(() => axios.get(`${this.baseURL}/${idPaciente}`, {
         headers: {
           'Authorization': `Bearer ${this.token}`,
         },
         timeout: 3000
-      });
+      }), {}, logger);
       return true;
     } catch (error) {
       if (error.response && error.response.status === 404) {

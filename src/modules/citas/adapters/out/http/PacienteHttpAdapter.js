@@ -2,6 +2,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const { IPacienteValidatorPort } = require('../../../ports/out');
 const { PacienteNoDisponibleError } = require('../../../domain/cita.errors');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
 
 class PacienteHttpAdapter extends IPacienteValidatorPort {
   constructor() {
@@ -21,10 +22,12 @@ class PacienteHttpAdapter extends IPacienteValidatorPort {
   async existePaciente(idPaciente) {
     try {
       const token = this._generarInternalToken();
-      await axios.get(`${this.baseUrl}/pacientes/${idPaciente}`, {
+      // Retry con backoff + jitter solo para fallos transitorios (red/5xx);
+      // un 404 se relanza de inmediato y lo maneja el catch de abajo.
+      await conReintentos(() => axios.get(`${this.baseUrl}/pacientes/${idPaciente}`, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 3000
-      });
+      }));
       return true;
     } catch (error) {
       if (error.response && error.response.status === 404) {

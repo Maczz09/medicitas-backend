@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
 const logger = require('../../../../../shared/logger/logger');
 
 class PacienteHttpAdapter {
@@ -9,10 +10,10 @@ class PacienteHttpAdapter {
 
   async obtenerNombre(idPaciente) {
     try {
-      const resp = await axios.get(`${this.baseUrl}/api/v1/pacientes/${idPaciente}`, {
+      const resp = await conReintentos(() => axios.get(`${this.baseUrl}/api/v1/pacientes/${idPaciente}`, {
         headers: { Authorization: `Bearer ${this.internalToken}` },
         timeout: 2000,
-      });
+      }), {}, logger);
       return `${resp.data.nombres} ${resp.data.apellidos}`;
     } catch (error) {
       logger.warn({ idPaciente, error: error.message }, 'No se pudo obtener el nombre del paciente desde SVC-PAC-005');
