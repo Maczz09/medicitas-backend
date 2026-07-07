@@ -11,7 +11,8 @@ const {
   ResourceNotFoundError,
   UserConflictError,
   InvalidOTPError,
-  InvalidTokenError
+  InvalidTokenError,
+  InvalidServiceCredentialsError
 } = require('../domain/auth.errors');
 const mailerService = require('../../../shared/infrastructure/mailer');
 const { publicarEventoOutbox } = require('../../../shared/infrastructure/outbox');
@@ -46,6 +47,22 @@ class AuthUseCases {
 
   _generateRefreshToken() {
     return crypto.randomBytes(40).toString('hex');
+  }
+
+  // Token de servicio (client-credentials) — vida corta, claim `tipo:'SERVICE'`
+  // que distingue estos tokens de los de usuarios humanos (sub = client_id, no
+  // id_usuario). Mismo JWT_SECRET/firmante que _generateAccessToken: cualquier
+  // middleware que ya valida JWTs humanos puede validar estos igual.
+  _generateServiceToken(serviceClient) {
+    return jwt.sign(
+      {
+        sub: serviceClient.client_id,
+        tipo: 'SERVICE',
+        servicio: serviceClient.servicio_nombre,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_SERVICE_EXPIRES_IN || '1h' }
+    );
   }
 
   _generateOTP() {
@@ -252,6 +269,31 @@ class AuthUseCases {
 
     this._emit('PasswordCambiado', { email: user.email, idUsuario: user.id_usuario })
       .catch((err) => console.warn('[Auth] Error publicando PasswordCambiado:', err.message));
+  }
+
+  // Client-credentials para servicios externos (farmacia-api, aseguradora-api):
+  // piden un token igual que un cliente OAuth2, en vez de usar una API key
+  // estática eterna. Coexiste con X-Webhook-Api-Key durante la ventana de
+  // deprecación — ver verifyWebhookApiKey.middleware.js.
+  async emitirTokenServicio(clientId, clientSecret) {
+    if (!clientId || !clientSecret) {
+      throw new AuthValidationError('clientId y clientSecret son obligatorios');
+    }
+
+    const client = await this.authRepository.findServiceClientByClientId(clientId);
+    if (!client) throw new InvalidServiceCredentialsError();
+
+    const isValid = await bcrypt.compare(clientSecret, client.client_secret_hash);
+    if (!isValid) throw new InvalidServiceCredentialsError();
+
+    const accessToken = this._generateServiceToken(client);
+
+    return {
+      accessToken,
+      tokenType: 'Bearer',
+      expiresIn: process.env.JWT_SERVICE_EXPIRES_IN || '1h',
+      servicio: client.servicio_nombre,
+    };
   }
 
   async assignRole(idUsuario, rolNombre) {

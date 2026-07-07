@@ -50,6 +50,11 @@ const PLANTILLAS = Object.freeze({
   ComprobanteEmitido: ({ tipo, numero, urlDescarga }) =>
     `MediCitas: Su ${tipo?.toLowerCase() || 'comprobante'} ${numero} listo. Descárgalo: ${urlDescarga}`,
 
+  RecetaContingenciaGenerada: ({ medicamento, urlDescarga }) =>
+    `⚠️ MediCitas — Contingencia: no pudimos enviar tu receta a la farmacia automáticamente. ` +
+    `Aquí tienes tu receta de ${medicamento || 'tu medicamento'} en PDF, preséntala en cualquier farmacia junto ` +
+    `con tu documento de identidad: ${urlDescarga}`,
+
 });
 
 // Tipos de evento que generan SMS — cualquier evento fuera de esta lista se ignora silenciosamente

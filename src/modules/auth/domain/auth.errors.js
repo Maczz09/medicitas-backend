@@ -59,6 +59,12 @@ class InvalidTokenError extends DomainError {
   }
 }
 
+class InvalidServiceCredentialsError extends DomainError {
+  constructor() {
+    super('INVALID_SERVICE_CREDENTIALS', 'clientId o clientSecret inválidos', 401);
+  }
+}
+
 module.exports = {
   AuthValidationError,
   AccountLockedError,
@@ -68,5 +74,6 @@ module.exports = {
   ResourceNotFoundError,
   UserConflictError,
   InvalidOTPError,
-  InvalidTokenError
+  InvalidTokenError,
+  InvalidServiceCredentialsError
 };

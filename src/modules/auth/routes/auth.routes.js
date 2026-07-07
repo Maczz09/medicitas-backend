@@ -53,6 +53,31 @@ router.post('/refresh', controller.refreshToken);
 
 /**
  * @swagger
+ * /api/v2/auth/service-token:
+ *   post:
+ *     summary: Emitir un token de servicio (client-credentials) para farmacia-api/aseguradora-api
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               clientId:
+ *                 type: string
+ *               clientSecret:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Token emitido
+ *       401:
+ *         description: clientId o clientSecret inválidos
+ */
+router.post('/service-token', controller.emitirTokenServicio);
+
+/**
+ * @swagger
  * /api/v2/auth/forgot-password:
  *   post:
  *     summary: Solicitar OTP para recuperación de contraseña

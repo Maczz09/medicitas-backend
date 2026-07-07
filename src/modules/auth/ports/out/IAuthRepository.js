@@ -14,6 +14,7 @@ class IAuthRepository {
   async updatePassword(userId, passwordHash)          { throw new Error('No implementado'); }
   async assignRole(userId, idRol)                     { throw new Error('No implementado'); }
   async updateUsuario(id, fields)                     { throw new Error('No implementado'); }
+  async findServiceClientByClientId(clientId)         { throw new Error('No implementado'); }
 }
 
 module.exports = { IAuthRepository };

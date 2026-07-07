@@ -204,4 +204,47 @@ router.get('/:id',
   controller.consultarValidacion
 );
 
+/**
+ * Recibe notificaciones de eventos de negocio desde seguros-fallback-service
+ * (cache-aside upsert, lectura de fallback servida, reconciliación) y las
+ * inserta en el mismo outbox transaccional de svc_seg — de ahí salen a
+ * RabbitMQ (medicitas.events) igual que cualquier otro evento del módulo, y
+ * el consumer de auditoría ya existente las captura automáticamente. Ese
+ * servicio nunca habla AMQP directo: no tiene ni necesita credenciales de
+ * RabbitMQ, solo este token interno compartido.
+ */
+router.post('/interno/eventos-fallback',
+  verifyToken,
+  requireRole(['INTERNAL']),
+  async (req, res, next) => {
+    try {
+      const { tipoEvento, payload, correlationId } = req.body || {};
+      if (!tipoEvento || !payload) {
+        return res.status(400).json({
+          codigo: 'DATOS_INCOMPLETOS',
+          mensaje: 'tipoEvento y payload son obligatorios.',
+          correlationId: req.correlationId || correlationId || null,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const conn = await getConnection();
+      try {
+        await conn.beginTransaction();
+        await eventPublisher.publish(conn, tipoEvento, payload, correlationId || req.correlationId);
+        await conn.commit();
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      } finally {
+        conn.release();
+      }
+
+      res.status(202).json({ recibido: true, correlationId: req.correlationId, timestamp: new Date().toISOString() });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 module.exports = router;

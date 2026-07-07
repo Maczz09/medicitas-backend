@@ -150,16 +150,32 @@ async function bootstrap() {
     const FarmaciaMockAdapter = require('./modules/prescripciones/adapters/out/gateway/FarmaciaMockAdapter');
     const FarmaciaAxiosAdapter = require('./modules/prescripciones/adapters/out/gateway/FarmaciaAxiosAdapter');
 
+    // Contingencia de farmacia (v2.1.0): PDF de receta + WhatsApp cuando el CB está abierto
+    const RecetasContingenciaMySQLRepository = require('./modules/prescripciones/adapters/out/RecetasContingenciaMySQLRepository');
+    const { RecetaPDFGenerator } = require('./modules/prescripciones/adapters/out/pdf/RecetaPDFGenerator');
+    const GenerarRecetaContingenciaUseCase = require('./modules/prescripciones/application/use-cases/GenerarRecetaContingenciaUseCase');
+
     const preGateway = process.env.USE_MOCK_FARMACIA === 'true'
       ? new FarmaciaMockAdapter()
       : new FarmaciaAxiosAdapter();
 
+    const preEventPublisher = new OutboxEventPublisher();
+
+    const generarContingenciaUseCase = new GenerarRecetaContingenciaUseCase({
+      recetasContingenciaRepository: new RecetasContingenciaMySQLRepository(),
+      pdfGenerator: new RecetaPDFGenerator(),
+      eventPublisher: preEventPublisher,
+      getConnection: async () => await database.getConnection(),
+      logger: require('./shared/logger/logger'),
+    });
+
     const iniciarDespachoUseCaseObj = new IniciarDespachoUseCase({
       despachosRepository: new DespachosMySQLRepository(),
       farmaciaGateway: preGateway,
-      eventPublisher: new OutboxEventPublisher(),
+      eventPublisher: preEventPublisher,
       getConnection: async () => await database.getConnection(),
-      logger: require('./shared/logger/logger')
+      logger: require('./shared/logger/logger'),
+      generarContingenciaUseCase,
     });
 
     const prescripcionesConsumer = new PrescripcionesConsumer(rabbitmq.getChannel(), iniciarDespachoUseCaseObj);

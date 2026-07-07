@@ -1,7 +1,10 @@
+const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const { requireRole } = require('../../../shared/infrastructure/rbac.middleware');
 const { verifyToken } = require('../../../shared/infrastructure/auth.middleware');
 const { checkIdempotency } = require('../../../shared/infrastructure/api_idempotency.middleware');
+const { DomainError } = require('../../../shared/domain/errors');
 
 const DespachosMySQLRepository = require('../adapters/out/DespachosMySQLRepository');
 const OutboxEventPublisher = require('../adapters/out/OutboxEventPublisher');
@@ -13,6 +16,12 @@ const FarmaciaMockAdapter = require('../adapters/out/gateway/FarmaciaMockAdapter
 const FarmaciaAxiosAdapter = require('../adapters/out/gateway/FarmaciaAxiosAdapter');
 const PrescripcionesController = require('../adapters/in/PrescripcionesController');
 
+// Contingencia de farmacia (v2.1.0)
+const RecetasContingenciaMySQLRepository = require('../adapters/out/RecetasContingenciaMySQLRepository');
+const { RecetaPDFGenerator } = require('../adapters/out/pdf/RecetaPDFGenerator');
+const GenerarRecetaContingenciaUseCase = require('../application/use-cases/GenerarRecetaContingenciaUseCase');
+const ConsultarRecetasContingenciaUseCase = require('../application/use-cases/ConsultarRecetasContingenciaUseCase');
+
 const dbPool = require('../../../config/database');
 
 const gateway = process.env.USE_MOCK_FARMACIA === 'true'
@@ -21,6 +30,20 @@ const gateway = process.env.USE_MOCK_FARMACIA === 'true'
 
 const repo = new DespachosMySQLRepository();
 const eventPublisher = new OutboxEventPublisher();
+const recetasContingenciaRepo = new RecetasContingenciaMySQLRepository();
+
+const generarContingenciaUseCase = new GenerarRecetaContingenciaUseCase({
+  recetasContingenciaRepository: recetasContingenciaRepo,
+  pdfGenerator: new RecetaPDFGenerator(),
+  eventPublisher,
+  getConnection: async () => await dbPool.getConnection(),
+  logger: require('../../../shared/logger/logger'),
+});
+
+const consultarRecetasContingenciaUseCase = new ConsultarRecetasContingenciaUseCase({
+  recetasContingenciaRepository: recetasContingenciaRepo,
+  db: dbPool,
+});
 
 // IniciarDespachoUseCase solo se usa para el helper en ReintentarEnvioUseCase
 const iniciarDespachoUseCase = new IniciarDespachoUseCase({
@@ -28,7 +51,8 @@ const iniciarDespachoUseCase = new IniciarDespachoUseCase({
   farmaciaGateway: gateway,
   eventPublisher: eventPublisher,
   getConnection: async () => await dbPool.getConnection(),
-  logger: require('../../../shared/logger/logger')
+  logger: require('../../../shared/logger/logger'),
+  generarContingenciaUseCase,
 });
 
 const consultarEstadoRecetaUseCase = new ConsultarEstadoRecetaUseCase({
@@ -116,16 +140,28 @@ router.get('/', verifyToken, requireRole('Médico', 'Recepcionista', 'Auditor'),
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
     const offset = (page - 1) * limit;
     const estado = req.query.estado;
-    const where = estado ? 'WHERE d.estado = ?' : '';
-    const params = estado ? [estado] : [];
+    const soloContingencia = req.query.contingencia === 'true';
 
-    const [countRows] = await dbPool.query(`SELECT COUNT(*) AS total FROM svc_pre.despachos d ${where}`, params);
+    const condiciones = [];
+    const params = [];
+    if (estado) { condiciones.push('d.estado = ?'); params.push(estado); }
+    if (soloContingencia) condiciones.push('rc.id IS NOT NULL');
+    const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
+
+    const [countRows] = await dbPool.query(
+      `SELECT COUNT(*) AS total FROM svc_pre.despachos d
+       LEFT JOIN svc_pre.recetas_contingencia rc ON rc.id_despacho = d.id
+       ${where}`,
+      params,
+    );
     const [rows] = await dbPool.query(
       `SELECT d.id, d.id_paciente, d.estado, d.contenido, d.referencia_farmacia, d.motivo_rechazo,
               d.intentos_envio, d.correlation_id, d.fecha_emision, d.created_at,
-              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre
+              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
+              rc.url_descarga AS contingencia_url_descarga
        FROM svc_pre.despachos d
        LEFT JOIN svc_pac.pacientes p ON p.id_paciente = d.id_paciente
+       LEFT JOIN svc_pre.recetas_contingencia rc ON rc.id_despacho = d.id
        ${where}
        ORDER BY d.created_at DESC
        LIMIT ${limit} OFFSET ${offset}`,
@@ -137,6 +173,38 @@ router.get('/', verifyToken, requireRole('Médico', 'Recepcionista', 'Auditor'),
       meta: { total: countRows[0].total, page, limit, totalPages: Math.ceil(countRows[0].total / limit) },
       correlationId: req.correlationId,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Contingencia de farmacia: listado + detalle + descarga de PDF ─────────────
+// IMPORTANTE: declaradas ANTES de GET /:id para que Express no interprete
+// "contingencia" como un :id del despacho.
+router.get('/contingencia', verifyToken, requireRole(['Médico', 'Recepcionista', 'Auditor']), async (req, res, next) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+    const { data, total } = await consultarRecetasContingenciaUseCase.listar({ page, limit });
+    res.json({
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      correlationId: req.correlationId,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Descarga pública (sin verifyToken): el link viaja por WhatsApp al paciente,
+// que no tiene sesión ni JWT — mismo patrón que /facturacion/comprobantes/:id/pdf.
+router.get('/contingencia/:id/pdf', async (req, res, next) => {
+  try {
+    const rutaPdf = await consultarRecetasContingenciaUseCase.obtenerRutaPdf(req.params.id);
+    if (!fs.existsSync(rutaPdf)) {
+      return next(new DomainError('ERROR_LECTURA_PDF', 500, 'El archivo PDF no existe físicamente'));
+    }
+    res.download(rutaPdf, path.basename(rutaPdf));
   } catch (err) {
     next(err);
   }

@@ -95,6 +95,7 @@ services:
       ASEGURADORA_API_URL:  ${ASEGURADORA_API_URL}
       ASEGURADORA_API_KEY:  ${ASEGURADORA_API_KEY}
       USE_MOCK_SEGURO:      ${USE_MOCK_SEGURO:-false}
+      SEGUROS_FALLBACK_URL: ${SEGUROS_FALLBACK_URL}
       FARMACIA_API_URL:     ${FARMACIA_API_URL}
       SMS_API_URL:          ${SMS_API_URL}
       SMS_API_KEY:          ${SMS_API_KEY}
@@ -127,6 +128,7 @@ services:
       # Volúmenes para desarrollo (hot-reloading)
       - ./src:/app/src
       - comprobantes_storage:/app/storage/comprobantes
+      - recetas_storage:/app/storage/recetas-contingencia
 
   # ─── WORKERS (PM2 administra Outbox + Tolerancia) ─────────
   workers:
@@ -312,6 +314,7 @@ volumes:
   redis_data:
   rabbitmq_data:
   comprobantes_storage:
+  recetas_storage:
   prometheus_data:
   grafana_data:
 

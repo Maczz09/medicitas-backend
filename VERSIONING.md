@@ -126,7 +126,7 @@ Esta condición **puede dejar de cumplirse** el día que cualquiera de estos ser
 
 ---
 
-## 6. Registro de versión
+## 6. Registro de versión (v2.0.0)
 
 | Repo | Versión anterior | Versión v2 |
 |---|---|---|
@@ -138,3 +138,65 @@ Esta condición **puede dejar de cumplirse** el día que cualquiera de estos ser
 Reflejado en `package.json` (`version`) y en el título/`info.version` de Swagger de cada backend.
 
 > **Nota**: `aseguradora-prosalud-api/package.json` ya traía `"version": "2.0.0"` desde su **commit inicial** (`f199b86`) — un número arbitrario, no producto de un versionado real anterior. Coincide por casualidad con el número que le corresponde ahora bajo este framework; se deja igual, pero se deja constancia de que no hubo una v1.x real detrás de ese número previo.
+
+---
+
+## 7. v2.1.0 — Contingencias, fallback de cobertura y auth de servicio (2026-07-07)
+
+### 7.1 Por qué v2.1.0 y no v3 ni v2.1.1
+
+Semver es `MAYOR.MENOR.PARCHE`. Los tres pedidos de esta ventana (fallback de aseguradora, contingencia de farmacia, auth de servicio) son **funcionalidad nueva**, no correcciones de bugs — por eso el dígito que sube es el del medio (`MENOR`), no el último (`PARCHE`, que habría sido incorrecto: v2.1.1 habría dado a entender que solo se corrigieron defectos).
+
+No es **v3** porque, aplicando la misma regla de compatibilidad hacia atrás del §1: todo lo nuevo es **aditivo** (nuevo servicio, nuevos endpoints, nuevas columnas) y el único cambio con forma de "breaking" — el mecanismo de autenticación de servicio — se implementó deliberadamente compatible: el método viejo (`X-Webhook-Api-Key`) sigue funcionando exactamente igual que antes, en paralelo con el nuevo (`Authorization: Bearer <JWT tipo:SERVICE>`), durante una ventana de deprecación explícita (ver §7.4). Ningún consumidor existente (`farmacia-api`, `aseguradora-prosalud-api`, ambos aún sin migrar a la fecha de este registro) deja de funcionar con este release.
+
+### 7.2 Inventario de cambios (todos aditivos/compatibles)
+
+| Repo | Cambio | Por qué es compatible |
+|---|---|---|
+| `seguros-fallback-service` (**nuevo repo**, v1.0.0) | Cache persistente de pólizas + worker de reconciliación en background + balanceador nginx (2 réplicas) | Servicio nuevo, aislado en su propio proceso/red/BD — no toca ningún contrato existente |
+| `medicitas-backend` | `AseguradoraAxiosAdapter`: cuando el circuit breaker está abierto, consulta el cache de `seguros-fallback-service` antes de devolver `PENDIENTE` genérico | El `esFallback:true/PENDIENTE` de siempre sigue siendo la red de seguridad final si el cache tampoco responde o no tiene el dato — ningún consumidor ve una forma de respuesta nueva, solo mejores datos en el mismo shape (`estadoCobertura`, `esFallback`, ahora con `origenFallback` opcional) |
+| `medicitas-backend` | Nuevo endpoint interno `POST /api/v2/coberturas/interno/eventos-fallback` (relé de auditoría desde `seguros-fallback-service`) | Endpoint nuevo, aditivo, protegido por `INTERNAL_SERVICE_TOKEN` |
+| `medicitas-backend` | Contingencia de farmacia: `GenerarRecetaContingenciaUseCase` genera un PDF de receta y dispara un WhatsApp con el link de descarga cuando el circuit breaker hacia farmacia-api está **abierto** (no en cada blip transitorio) | Rama de código nueva, solo se ejecuta en el escenario de caída sostenida; el flujo normal de despacho (cola → reintento → DLQ) no cambia |
+| `medicitas-backend` | Nuevos endpoints `GET /api/v2/prescripciones/contingencia` (listado, autenticado) y `GET /api/v2/prescripciones/contingencia/:id/pdf` (descarga pública, mismo patrón que `/facturacion/comprobantes/:id/pdf`) | Aditivos |
+| `medicitas-backend` | `GET /api/v2/prescripciones` (listado existente) ahora incluye `contingencia_url_descarga`; nuevo query param opcional `?contingencia=true` | Campo/parámetro nuevo y opcional — un consumidor que no lo envía/lee no ve cambio |
+| `medicitas-backend` | Auth de servicio: nuevo endpoint `POST /api/v2/auth/service-token` (client-credentials), tabla `service_clients` | Endpoint nuevo, aditivo |
+| `medicitas-backend` | `verifyWebhookApiKey.middleware.js` acepta `Authorization: Bearer <JWT tipo:SERVICE>` además de `X-Webhook-Api-Key` | Ambos métodos coexisten — ver §7.4 para la fecha de retiro del método viejo |
+| `medicitas-frontend` | `RecetasPage`/`AdminPrescripcionesPage`: badge y filtro "Contingencia" | Aditivo — usa el campo nuevo y opcional de arriba |
+| `medicitas-frontend` | Cierre de sesión ~5s después de cerrar la ventana/pestaña | Ver §7.5 para la limitación técnica y la interpretación implementada |
+
+### 7.3 Hallazgos de esquema corregidos de paso (drift, no relacionados con lo nuevo)
+
+Durante la implementación se encontraron y corrigieron 3 desincronizaciones entre `db/init.sql` y el esquema realmente vivo en producción (mismo patrón de bug ya corregido para `svc_seg.validaciones_cobertura` en la sesión anterior — `init.sql` no se había mantenido al día con `ALTER TABLE`s aplicados directamente):
+
+- `svc_pre.despachos_receta` (nombre y columnas de `init.sql`) → la tabla viva se llama `despachos` y tiene columnas distintas (`id_evento_origen`, `contenido`, `fecha_despacho`, etc., ausentes de la definición vieja). Un despliegue nuevo desde `init.sql` habría roto el módulo de prescripciones por completo.
+- `svc_pre.outbox` en `init.sql` usaba la convención de columnas B (`id_evento`/`tipo_evento`/`estado`); la tabla viva usa la convención A (`id`/`evento`/`publicado`), la misma que `OutboxEventPublisher.js` de prescripciones siempre escribió.
+- `svc_not.mensajes_sms.estado` — el ENUM vivo no incluía `PENDIENTE_VINCULACION` (usado por `MensajeSMS.crearPendienteVinculacion()` cada vez que WhatsApp está desvinculado). Esto significaba que **toda notificación intentada mientras WhatsApp estaba desvinculado fallaba silenciosamente y terminaba en la DLQ tras 3 reintentos**, sin quedar registrada para reenvío posterior — un bug de producción real, descubierto al probar la contingencia de farmacia con la sesión de WhatsApp desvinculada. Corregido en vivo y en `init.sql`.
+
+### 7.4 Ventana de deprecación — `X-Webhook-Api-Key`
+
+Siguiendo la disciplina que el propio §5 dejó pendiente para la próxima ruptura de contrato:
+
+| Campo | Valor |
+|---|---|
+| **Qué se deprecia** | Autenticación de webhooks/S2S vía header estático `X-Webhook-Api-Key` |
+| **Alternativa** | `Authorization: Bearer <token>` emitido por `POST /api/v2/auth/service-token` (client-credentials, vida de 1h, renovable) |
+| **Desde cuándo** | 2026-07-07 (este release) — ambos métodos activos en paralelo desde hoy |
+| **Hasta cuándo** | 2026-09-05 (60 días) — fecha objetivo para retirar `X-Webhook-Api-Key`; requiere que `farmacia-api` y `aseguradora-prosalud-api` migren a pedir y usar el token de servicio antes de esa fecha |
+| **Responsable** | Equipo de plataforma (`medicitas-backend`) coordina el retiro; los propios repos de farmacia/aseguradora son quienes deben migrar su llamada saliente |
+| **Estado a la fecha de este registro** | `farmacia-api` y `aseguradora-prosalud-api` **aún no migrados** — siguen usando `X-Webhook-Api-Key`. Se generaron credenciales de servicio (`svc-farmacia-api`, `svc-aseguradora-api`) en `medicitas_users.service_clients`, listas para cuando se actualice el código de esos dos repos |
+
+### 7.5 Cierre de sesión tras cerrar ventana — interpretación implementada
+
+Un navegador no permite ejecutar un timer *después* de que la pestaña ya se cerró, así que "cerrar sesión 5 segundos después de cerrar la ventana" no es literalmente implementable tal cual. La interpretación usada (`useCloseWindowLogout.ts`): al detectar `pagehide` (cierre de pestaña, recarga completa o navegación fuera de la SPA) se guarda el instante en `localStorage`; la próxima vez que la app carga o recupera el foco, si pasaron más de 5 segundos desde ese instante, se cierra la sesión automáticamente. Una recarga (F5) o una navegación interna de la SPA no activan el cierre — solo un cierre real seguido de una ausencia de más de 5s.
+
+---
+
+## 8. Registro de versión (v2.1.0)
+
+| Repo | Versión anterior | Versión v2.1.0 |
+|---|---|---|
+| `medicitas-backend` | 2.0.0 | **2.1.0** |
+| `seguros-fallback-service` | — (repo nuevo) | **1.0.0** |
+| `farmacia-api` | 2.0.0 | sin bump — sin cambios de código en esta ventana |
+| `aseguradora-prosalud-api` | 2.0.0 | sin bump — sin cambios de código en esta ventana |
+| `medicitas-frontend` | — (sin contrato de API propio) | sin bump — no expone contrato |

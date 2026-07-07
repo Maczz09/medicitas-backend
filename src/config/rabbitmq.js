@@ -42,6 +42,7 @@ async function connect() {
   await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.Recordatorio30m');
   await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.AlertaRetraso');
   await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.CitaExpirada');
+  await channel.bindQueue('q.notificaciones', 'medicitas.events', 'event.RecetaContingenciaGenerada');
 
   // Prescripciones
   await channel.assertQueue('q.prescripciones.dlq', { durable: true });

@@ -2,12 +2,13 @@ const Despacho = require('../../domain/entities/Despacho');
 const { FARMACIA_DEFAULT_ID } = require('../../../../shared/config/farmacia.config');
 
 class IniciarDespachoUseCase {
-  constructor({ despachosRepository, farmaciaGateway, eventPublisher, getConnection, logger }) {
+  constructor({ despachosRepository, farmaciaGateway, eventPublisher, getConnection, logger, generarContingenciaUseCase }) {
     this.despachosRepo = despachosRepository;
     this.farmaciaGateway = farmaciaGateway;
     this.eventPublisher = eventPublisher;
     this.getConnection = getConnection;
     this.logger = logger;
+    this.generarContingenciaUseCase = generarContingenciaUseCase || null;
   }
 
   async ejecutar(payloadPrescripcionEmitida, correlationId, idEvento) {
@@ -97,7 +98,19 @@ class IniciarDespachoUseCase {
         }, correlationId);
 
       } else {
-        // origenFallo === 'TRANSPORTE': timeout, CB abierto, 5xx, error de config
+        // origenFallo === 'TRANSPORTE': timeout, CB abierto, 5xx, error de config.
+        // Solo se dispara la contingencia cuando el CB ya está ABIERTO (caída
+        // sostenida, no un timeout aislado) — evita generar un PDF/WhatsApp por
+        // cada blip transitorio que el reintento normal ya resuelve solo.
+        // Best-effort: un fallo aquí jamás debe impedir el reencolado normal.
+        if (this.farmaciaGateway.breaker?.opened && this.generarContingenciaUseCase) {
+          try {
+            await this.generarContingenciaUseCase.ejecutar(despacho, contenido, correlationId);
+          } catch (contErr) {
+            this.logger.warn({ err: contErr.message, idDespacho: despacho.id },
+              '[Contingencia] Fallo generando PDF/WhatsApp de contingencia — no bloquea el reintento normal del despacho.');
+          }
+        }
         // Lanzamos error para que la transacción se revierta y RabbitMQ reencole el mensaje.
         throw new Error(`Fallo temporal de transporte hacia farmacia-api: ${resultado.motivoRechazo}`);
       }

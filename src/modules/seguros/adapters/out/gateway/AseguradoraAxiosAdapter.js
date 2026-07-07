@@ -7,6 +7,15 @@ const { RespuestaSanitizer }    = require('./sanitizer/RespuestaSanitizer');
 const logger = require('../../../../../shared/logger/logger');
 const { maskDocumento } = require('../../../../../shared/infrastructure/pii');
 
+// Cliente hacia seguros-fallback-service (cache-aside de pólizas) — best-effort
+// en ambas direcciones (escritura y lectura), nunca bloquea ni rompe el flujo
+// principal si el servicio de fallback también está caído.
+const fallbackClient = axios.create({
+  baseURL: process.env.SEGUROS_FALLBACK_URL || 'http://localhost:4010',
+  timeout: parseInt(process.env.SEGUROS_FALLBACK_TIMEOUT_MS || '1500'),
+  headers: { Authorization: `Bearer ${process.env.INTERNAL_SERVICE_TOKEN}` },
+});
+
 /**
  * AseguradoraAxiosAdapter — Gateway HTTP hacia aseguradora-prosalud-api.
  *
@@ -70,7 +79,7 @@ class AseguradoraAxiosAdapter {
       numeroDocumento: numeroPoliza,
     };
 
-    return conRetryYFallback(
+    const resultado = await conRetryYFallback(
       () => this.breaker.fire(datos),
       () => this.breaker.opened,
       this._respuestaFallback(),
@@ -81,6 +90,66 @@ class AseguradoraAxiosAdapter {
       },
       logger,
     );
+
+    // El fallback estático de conRetryYFallback (PENDIENTE genérico) es la red
+    // de seguridad final. Antes de conformarnos con "no sé", intentamos
+    // mejorarlo con seguros-fallback-service: si ese paciente ya fue validado
+    // exitosamente antes, podemos responder con datos reales en vez de un
+    // PENDIENTE ciego. Si el servicio de fallback también falla o no tiene el
+    // dato, el PENDIENTE original se conserva sin cambios.
+    if (resultado.esFallback) {
+      const mejorado = await this._consultarCacheFallback(datos.tipoDocumento, datos.numeroDocumento);
+      if (mejorado) return mejorado;
+    }
+
+    return resultado;
+  }
+
+  /** Lectura best-effort del cache — nunca lanza, nunca bloquea más de SEGUROS_FALLBACK_TIMEOUT_MS. */
+  async _consultarCacheFallback(tipoDocumento, numeroDocumento) {
+    try {
+      const { data } = await fallbackClient.get(`/interno/polizas-cache/${tipoDocumento}/${numeroDocumento}`);
+      if (!data.encontrado) return null;
+
+      if (data.vigente) {
+        return {
+          estadoCobertura:     'APROBADA',
+          porcentajeCobertura: data.porcentajeCobertura,
+          codigoAutorizacion:  null, // no hay código de autorización real: viene de caché, no de la aseguradora en vivo
+          vigencia:            data.fechaFin,
+          esFallback:          true,
+          origenFallback:      'CACHE',
+        };
+      }
+      return {
+        estadoCobertura:     'RECHAZADA',
+        porcentajeCobertura: 0,
+        codigoAutorizacion:  null,
+        vigencia:            null,
+        esFallback:          true,
+        origenFallback:      'CACHE_VENCIDA',
+      };
+    } catch (err) {
+      logger.warn({ err: err.message }, '[AseguradoraAxiosAdapter] seguros-fallback-service no disponible — se mantiene el PENDIENTE genérico');
+      return null;
+    }
+  }
+
+  /** Escritura best-effort del cache tras una validación real exitosa — nunca bloquea ni lanza. */
+  _cachearBestEffort({ tipoDocumento, numeroDocumento, idAseguradora, data }) {
+    fallbackClient.put('/interno/polizas-cache', {
+      tipoDocumento,
+      numeroDocumento,
+      idAseguradora: idAseguradora || 'aseguradora-prosalud',
+      numeroPoliza: data.numeroPoliza,
+      plan: data.plan,
+      porcentajeCobertura: data.porcentajeCobertura,
+      fechaInicio: data.vigencia?.fechaInicio,
+      fechaFin: data.vigencia?.fechaFin,
+      estadoPoliza: 'VIGENTE',
+    }).catch((err) => {
+      logger.warn({ err: err.message }, '[AseguradoraAxiosAdapter] No se pudo cachear en seguros-fallback-service (no bloquea la respuesta)');
+    });
   }
 
   // Infiere el tipo de documento por el formato del número:
@@ -110,6 +179,12 @@ class AseguradoraAxiosAdapter {
         motivoRechazo:       'No se encontró póliza vigente para este documento',
       };
     }
+
+    // Cache-aside: validación real y exitosa — se cachea best-effort para que
+    // un futuro fallback (circuit breaker abierto) pueda responder con datos
+    // reales en vez de un PENDIENTE genérico. No bloquea ni puede fallar esta
+    // respuesta (fire-and-forget).
+    this._cachearBestEffort({ tipoDocumento, numeroDocumento, data });
 
     // Respuesta exitosa — sanitizar antes de devolver al use case
     const respuestaMapeada = {

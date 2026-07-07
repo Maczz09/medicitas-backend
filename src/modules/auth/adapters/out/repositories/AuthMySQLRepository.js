@@ -171,6 +171,14 @@ class AuthMySQLRepository {
     );
   }
 
+  async findServiceClientByClientId(clientId) {
+    const [rows] = await db.query(
+      `SELECT * FROM medicitas_users.service_clients WHERE client_id = ? AND activo = 1`,
+      [clientId]
+    );
+    return rows[0] || null;
+  }
+
   async updateUsuario(id, { nombre, apellido, email, idRol, activo }) {
     const fields = [];
     const params = [];

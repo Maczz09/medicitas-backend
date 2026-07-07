@@ -55,10 +55,25 @@ CREATE TABLE IF NOT EXISTS user_security (
   CONSTRAINT fk_user_security FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO user_security (id_usuario) VALUES 
+INSERT IGNORE INTO user_security (id_usuario) VALUES
   ('usr-rec-001'),
   ('usr-med-001'),
   ('usr-aud-001');
+
+-- Auth de servicio (client-credentials, v2.1.0): farmacia-api/aseguradora-api
+-- piden un token vía POST /api/v2/auth/service-token en vez de usar una API
+-- key estática eterna. Ver EmitirTokenServicioUseCase (auth.usecases.js) y
+-- verifyWebhookApiKey.middleware.js (acepta ambos métodos en paralelo).
+CREATE TABLE IF NOT EXISTS service_clients (
+  id                 VARCHAR(36)  NOT NULL DEFAULT (UUID()),
+  client_id          VARCHAR(100) NOT NULL,
+  client_secret_hash VARCHAR(255) NOT NULL,
+  servicio_nombre    VARCHAR(100) NOT NULL,
+  activo             TINYINT(1)   NOT NULL DEFAULT 1,
+  created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_client_id (client_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS sesiones_auditoria (
   id_sesion     VARCHAR(36)   NOT NULL DEFAULT (UUID()),
@@ -219,19 +234,27 @@ CREATE TABLE IF NOT EXISTS eventos_procesados (
 CREATE DATABASE IF NOT EXISTS svc_seg CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE svc_seg;
 
+-- Columnas y nombre de PK alineados a la BD viva (drift histórico: este script
+-- se había quedado desactualizado respecto a ALTERs aplicados manualmente en
+-- sesiones anteriores — CoberturasMySQLRepository.js ya usa `id`, `es_fallback`
+-- y `correlation_id`, y nunca usó `respuesta_raw` ni `id_validacion`).
 CREATE TABLE IF NOT EXISTS validaciones_cobertura (
-  id_validacion   VARCHAR(36) NOT NULL DEFAULT (UUID()),
+  id              VARCHAR(36) NOT NULL DEFAULT (UUID()),
   id_paciente     VARCHAR(36) NOT NULL,
   id_aseguradora  VARCHAR(50) NOT NULL,
-  numero_poliza   VARCHAR(100) NOT NULL,
-  tipo_consulta   VARCHAR(100),
+  numero_poliza   VARCHAR(50) NOT NULL,
+  tipo_consulta   VARCHAR(50) NOT NULL,
   estado_cobertura ENUM('APROBADA', 'RECHAZADA', 'PENDIENTE') NOT NULL,
-  porcentaje_cobertura DECIMAL(5,2),
-  codigo_autorizacion  VARCHAR(100),
+  porcentaje_cobertura DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  codigo_autorizacion  VARCHAR(50),
   vigencia        DATE,
-  respuesta_raw   JSON,
+  es_fallback     TINYINT(1) NOT NULL DEFAULT 0,
+  correlation_id  VARCHAR(36),
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id_validacion)
+  PRIMARY KEY (id),
+  INDEX idx_paciente_poliza (id_paciente, numero_poliza),
+  INDEX idx_aseguradora (id_aseguradora),
+  INDEX idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS outbox (
@@ -387,13 +410,20 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE DATABASE IF NOT EXISTS svc_not CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE svc_not;
 
+-- NOTA: `estado` corregido para incluir PENDIENTE_VINCULACION (ver
+-- MensajeSMS.js/EstadoSMS) — faltaba en este archivo y el INSERT de
+-- MensajesSMSMySQLRepository.save() fallaba en vivo (ER_...truncated) cada
+-- vez que WhatsApp estaba desvinculado. Se agrega también id_paciente, que
+-- el repositorio ya escribe pero no estaba declarada aquí.
 CREATE TABLE IF NOT EXISTS mensajes_sms (
   id_mensaje    VARCHAR(36)   NOT NULL DEFAULT (UUID()),
   id_evento_origen VARCHAR(36) NOT NULL,
   tipo_evento   VARCHAR(100)  NOT NULL,
+  id_paciente   VARCHAR(36)   DEFAULT NULL,
   telefono_destino VARCHAR(20) NOT NULL,
   contenido     TEXT          NOT NULL,
-  estado        ENUM('PENDIENTE', 'ENVIADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  estado        ENUM('PENDIENTE', 'ENVIADO', 'FALLIDO', 'PENDIENTE_VINCULACION') NOT NULL DEFAULT 'PENDIENTE',
+  referencia_gateway VARCHAR(100) DEFAULT NULL,
   intentos      INT           NOT NULL DEFAULT 0,
   error_msg     TEXT,
   correlation_id VARCHAR(36)  NOT NULL,
@@ -447,33 +477,68 @@ CREATE TABLE IF NOT EXISTS eventos_procesados (
 CREATE DATABASE IF NOT EXISTS svc_pre CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE svc_pre;
 
-CREATE TABLE IF NOT EXISTS despachos_receta (
-  id_receta       VARCHAR(36) NOT NULL DEFAULT (UUID()),
-  id_prescripcion VARCHAR(36) NOT NULL,
-  id_encuentro    VARCHAR(36) NOT NULL,
-  id_paciente     VARCHAR(36) NOT NULL,
-  estado          ENUM('CREADA', 'ENVIADA_A_FARMACIA', 'DESPACHADA', 'RECHAZADA_POR_STOCK', 'RECHAZADA_POR_VALIDACION', 'RETIRADA') NOT NULL DEFAULT 'CREADA',
-  farmacia_id     VARCHAR(50),
-  observacion_farmacia TEXT,
-  intentos        INT         NOT NULL DEFAULT 0,
-  correlation_id  VARCHAR(36) NOT NULL,
-  created_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id_receta),
-  UNIQUE KEY uq_prescripcion (id_prescripcion)
+-- NOTA: el nombre real en producción es `despachos` (no `despachos_receta`) y las
+-- columnas difieren de una versión anterior de este archivo — corregido para que
+-- coincida exactamente con la tabla viva (ver DespachosMySQLRepository.js).
+CREATE TABLE IF NOT EXISTS despachos (
+  id                      VARCHAR(20)  NOT NULL,
+  id_evento_origen        VARCHAR(36)  NOT NULL,
+  id_prescripcion_clinica VARCHAR(36)  NOT NULL,
+  id_encuentro_clinico    VARCHAR(36)  NOT NULL,
+  id_paciente             VARCHAR(36)  NOT NULL,
+  id_farmacia             VARCHAR(36)  NOT NULL,
+  estado                  ENUM('CREADA','ENVIADA_A_FARMACIA','DESPACHADA','RECHAZADA','RECHAZADA_POR_STOCK','RECHAZADA_POR_VALIDACION','RETIRADA') NOT NULL DEFAULT 'CREADA',
+  contenido               JSON         DEFAULT NULL,
+  fecha_emision           DATETIME     NOT NULL,
+  fecha_despacho          DATETIME     DEFAULT NULL,
+  fecha_retiro            DATETIME     DEFAULT NULL,
+  referencia_farmacia     VARCHAR(100) DEFAULT NULL,
+  observacion_farmacia    TEXT,
+  motivo_rechazo          VARCHAR(255) DEFAULT NULL,
+  intentos_envio          INT          NOT NULL DEFAULT 0,
+  correlation_id          VARCHAR(36)  DEFAULT NULL,
+  created_at              TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at              TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_evento_origen (id_evento_origen),
+  KEY idx_estado (estado),
+  KEY idx_paciente (id_paciente),
+  KEY idx_prescripcion (id_prescripcion_clinica)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Contingencia de farmacia (v2.1.0): receta en PDF generada cuando el circuit
+-- breaker hacia farmacia-api está abierto — ver GenerarRecetaContingenciaUseCase.
+CREATE TABLE IF NOT EXISTS recetas_contingencia (
+  id             VARCHAR(36)  NOT NULL,
+  id_despacho    VARCHAR(20)  NOT NULL,
+  id_paciente    VARCHAR(36)  NOT NULL,
+  medicamento    VARCHAR(200),
+  dosis          VARCHAR(100),
+  cantidad       VARCHAR(50),
+  ruta_pdf       VARCHAR(500) NOT NULL,
+  url_descarga   VARCHAR(500) NOT NULL,
+  correlation_id VARCHAR(36),
+  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_despacho (id_despacho)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- NOTA: esta tabla usa la convención A (id/evento/publicado) — a diferencia de
+-- otros esquemas outbox en este archivo, que usan la convención B
+-- (id_evento/tipo_evento/estado). Ver workers/outbox.worker.js, que detecta en
+-- tiempo de ejecución cuál convención usa cada esquema. Corregido para igualar
+-- la tabla viva (antes definía columnas que OutboxEventPublisher.js de
+-- prescripciones nunca llegó a escribir).
 CREATE TABLE IF NOT EXISTS outbox (
-  id_evento     VARCHAR(36)  NOT NULL,
-  tipo_evento   VARCHAR(100) NOT NULL,
-  payload       JSON         NOT NULL,
-  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
-  intentos      INT          NOT NULL DEFAULT 0,
-  correlation_id VARCHAR(36) NOT NULL,
-  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  publicado_en  TIMESTAMP    NULL,
-  error_msg     TEXT,
-  PRIMARY KEY (id_evento)
+  id             VARCHAR(36) NOT NULL,
+  evento         VARCHAR(60) NOT NULL,
+  payload        JSON        NOT NULL,
+  correlation_id VARCHAR(36) DEFAULT NULL,
+  publicado      TINYINT(1)  NOT NULL DEFAULT 0,
+  intentos       INT         NOT NULL DEFAULT 0,
+  created_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_publicado (publicado, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS eventos_procesados (

@@ -14,6 +14,16 @@ exports.login = async (req, res, next) => {
   }
 };
 
+exports.emitirTokenServicio = async (req, res, next) => {
+  try {
+    const { clientId, clientSecret } = req.body;
+    const result = await authUseCases.emitirTokenServicio(clientId, clientSecret);
+    res.status(200).json({ ...result, correlationId: req.correlationId });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.refreshToken = async (req, res, next) => {
   try {
     const { refreshToken } = req.body;

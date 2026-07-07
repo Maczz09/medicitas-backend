@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const logger = require('../../logger/logger');
 
 /**
@@ -9,10 +10,29 @@ const logger = require('../../logger/logger');
  * en el entorno, el middleware rechaza TODAS las peticiones (fail-closed) en
  * vez de aceptar cualquier valor.
  *
+ * v2.1.0: acepta también un token de servicio (Authorization: Bearer <JWT
+ * tipo:SERVICE>, emitido por POST /api/v2/auth/service-token) — client-
+ * credentials en vez de una API key estática eterna. Ambos métodos coexisten
+ * durante la ventana de deprecación de X-Webhook-Api-Key (ver VERSIONING.md).
+ *
  * @param {string} envVarName — nombre de la variable de entorno con la clave esperada
  */
 function verifyWebhookApiKey(envVarName) {
   return function (req, res, next) {
+    const authHeader = req.headers['authorization'] || '';
+    if (authHeader.startsWith('Bearer ')) {
+      try {
+        const payload = jwt.verify(authHeader.slice(7).trim(), process.env.JWT_SECRET);
+        if (payload.tipo === 'SERVICE') {
+          req.serviceClient = { clientId: payload.sub, servicio: payload.servicio };
+          return next();
+        }
+      } catch (err) {
+        // Token ausente/inválido/expirado — cae al método legado en vez de
+        // rechazar de inmediato, por si el caller aún no migró.
+      }
+    }
+
     const expectedKey = process.env[envVarName];
 
     if (!expectedKey) {
