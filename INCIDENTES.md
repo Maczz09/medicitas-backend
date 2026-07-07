@@ -120,6 +120,6 @@ Catálogo de problemas reales encontrados durante el desarrollo del ecosistema M
 
 **Causa raíz**: a diferencia del webhook de farmacia (que valida explícitamente `if (!idReceta || !estado) return res.status(400)...` antes de procesar), el handler del webhook de seguros no valida la presencia de los campos requeridos antes de usarlos — confirmado que ocurre igual con la autenticación vieja y la nueva, así que no es un problema de autenticación.
 
-**Estado**: no corregido en esta sesión — identificado y delegado como tarea aparte (falta de validación de entrada, de bajo riesgo pero afecta la calidad de los mensajes de error). Ver tarea spawneada `task_69b134c6`.
+**Solución**: `WebhookController.recibirWebhook` ahora valida explícitamente que `nuevoEstado` esté presente y que venga al menos uno de `idValidacion`/`numeroPoliza` (los campos que `ProcesarWebhookAseguradoraUseCase` realmente usa como bind params), devolviendo `400 { codigo: 'DATOS_INCOMPLETOS', ... }` antes de invocar el caso de uso — mismo patrón de guard clause que el webhook de farmacia, con el envelope (`codigo`/`mensaje`/`correlationId`/`timestamp`) que ya usaba el propio módulo de seguros en `/interno/eventos-fallback`.
 
-**Prevención**: al agregar cualquier endpoint que reciba un body externo, validar explícitamente los campos requeridos antes de leerlos — patrón ya establecido en el webhook de farmacia, solo falta replicarlo aquí.
+**Prevención**: al agregar cualquier endpoint que reciba un body externo, validar explícitamente los campos requeridos antes de leerlos — patrón ya replicado en ambos webhooks (farmacia y seguros).

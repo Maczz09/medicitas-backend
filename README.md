@@ -49,7 +49,7 @@ src/modules/<dominio>/
 
 Los módulos: `auth`, `pacientes`, `medicos`, `citas`, `seguros`, `pagos`, `historiaclinica`, `prescripciones`, `facturacion`, `notificaciones`, `auditoria`.
 
-**Por qué "S2S por HTTP" en vez de llamadas de función directas:** varios módulos se validan entre sí (p. ej. Pagos verifica el estado de una Cita) haciendo una petición HTTP a `localhost:3000/api/v1/...` con un token interno (`INTERNAL_SERVICE_TOKEN`), en vez de importar el código del otro módulo directamente. Esto es deliberado: mantiene los módulos desacoplados como si ya fueran microservicios, así que extraer cualquiera de ellos a un servicio separado en el futuro no requiere reescribir la lógica de negocio, solo cambiar la URL base del cliente HTTP.
+**Por qué "S2S por HTTP" en vez de llamadas de función directas:** varios módulos se validan entre sí (p. ej. Pagos verifica el estado de una Cita) haciendo una petición HTTP a `localhost:3000/api/v2/...` con un token interno (`INTERNAL_SERVICE_TOKEN`), en vez de importar el código del otro módulo directamente. Esto es deliberado: mantiene los módulos desacoplados como si ya fueran microservicios, así que extraer cualquiera de ellos a un servicio separado en el futuro no requiere reescribir la lógica de negocio, solo cambiar la URL base del cliente HTTP.
 
 **Múltiples schemas MySQL** en el mismo servidor (no una sola base de datos compartida): `medicitas_users`, `svc_pac`, `svc_med`, `svc_cit`, `svc_seg`, `svc_pag`, `svc_hcl`, `svc_pre`, `svc_fac`, `svc_not`, `svc_aud`. Cada módulo solo tiene permisos/lee-escribe su propio schema — evita el acoplamiento de tablas típico de un monolito "de verdad".
 
@@ -57,7 +57,7 @@ Los módulos: `auth`, `pacientes`, `medicos`, `citas`, `seguros`, `pagos`, `hist
 
 ## Módulos y endpoints
 
-Todos los endpoints cuelgan de `/api/v1/` detrás del gateway Nginx (puerto `80`) o directo contra el backend (puerto interno `3000`, no publicado al host). Documentación interactiva completa en Swagger: **http://localhost/api-docs/**
+Todos los endpoints cuelgan de `/api/v2/` detrás del gateway Nginx (puerto `80`) o directo contra el backend (puerto interno `3000`, no publicado al host). Documentación interactiva completa en Swagger: **http://localhost/api-docs/**
 
 | Módulo | Base | Resumen |
 |---|---|---|
@@ -100,8 +100,8 @@ Todos los endpoints cuelgan de `/api/v1/` detrás del gateway Nginx (puerto `80`
 |---|---|---|
 | Saliente | SVC-SEG → `aseguradora-api` `GET /asegurados/validar` | Axios + Circuit Breaker (`opossum`) + Retry Full Jitter |
 | Saliente | SVC-PRE → `farmacia-api` `POST /recepcionar-receta` | Axios + Circuit Breaker + Retry Full Jitter |
-| Entrante | `farmacia-api` → `POST /api/v1/webhooks/farmacia` | Notifica cambio de estado de una receta (retirada/rechazada) |
-| Entrante | `aseguradora-api` → `POST /api/v1/webhooks/seguros` | Notifica cambio de estado de una póliza |
+| Entrante | `farmacia-api` → `POST /api/v2/webhooks/farmacia` | Notifica cambio de estado de una receta (retirada/rechazada) |
+| Entrante | `aseguradora-api` → `POST /api/v2/webhooks/seguros` | Notifica cambio de estado de una póliza |
 
 Los webhooks entrantes se autentican con un **secreto compartido bidireccional**: la misma `FARMACIA_API_KEY` / `ASEGURADORA_API_KEY` que MediCitas usa para llamar a esas APIs, autentica también las llamadas en sentido inverso (header `X-Webhook-Api-Key`, comparación constant-time vía `crypto.timingSafeEqual`, fail-closed si la env var no está configurada). Ver `src/shared/infrastructure/webhooks/verifyWebhookApiKey.middleware.js`.
 
@@ -221,13 +221,13 @@ En vez de WebSockets, el frontend recibe actualizaciones en vivo vía **Server-S
 ```
 Backend: cola RabbitMQ efímera (bind '#' a medicitas.events)
    → broadcastEvent() → todas las conexiones SSE activas
-Frontend: EventSource('/api/v1/realtime/stream')
+Frontend: EventSource('/api/v2/realtime/stream')
    → onmessage → queryClient.invalidateQueries() (React Query refresca todo)
 ```
 
 Implementación: `src/shared/infrastructure/realtime.routes.js` (backend), `useRealtimeSync()` (frontend, montado una vez en la raíz de la app).
 
-⚠️ Si el gateway nginx que sirve el frontend está delante de este endpoint, la location de `/api/v1/realtime/` necesita `proxy_buffering off` y un `proxy_read_timeout` largo — con buffering encendido (el default de nginx) los eventos quedan atrapados y nunca llegan en tiempo real; con el timeout corto por defecto la conexión persistente se corta cada ~30s.
+⚠️ Si el gateway nginx que sirve el frontend está delante de este endpoint, la location de `/api/v2/realtime/` necesita `proxy_buffering off` y un `proxy_read_timeout` largo — con buffering encendido (el default de nginx) los eventos quedan atrapados y nunca llegan en tiempo real; con el timeout corto por defecto la conexión persistente se corta cada ~30s.
 
 ---
 
