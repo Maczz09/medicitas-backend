@@ -24,6 +24,8 @@ const webhookRouter = require('./modules/prescripciones/routes/webhook.routes');
 const segurosWebhookRouter = require('./modules/seguros/routes/webhook.routes');
 const twilioWebhook = require('./shared/infrastructure/webhooks/twilio.webhook');
 const { realtimeRouter } = require('./shared/infrastructure/realtime.routes');
+const serviceSwitchRouter = require('./shared/infrastructure/serviceSwitch.routes');
+const { killSwitch } = require('./shared/infrastructure/killSwitch.middleware');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -94,7 +96,8 @@ app.use('/api/v2/pacientes', pacientesRouter);
 app.use('/api/v2/medicos', medicosRouter);
 app.use('/api/v2/citas', citasRoutes);
 app.use('/api/v2/coberturas', segurosRoutes);
-app.use('/api/v2/pagos', pagosRouter);
+app.use('/api/v2/pagos', killSwitch('pagos'), pagosRouter);
+app.use('/api/v2/admin/servicios', serviceSwitchRouter);
 app.use('/api/v2/historias-clinicas', hclRouter);
 app.use('/api/v2/prescripciones', preRouter);
 app.use('/api/v2/facturacion', facRouter);
