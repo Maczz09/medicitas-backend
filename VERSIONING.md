@@ -33,11 +33,11 @@ Con al menos un breaking change confirmado, la política es categórica: **no cr
 
 ## 2. Estrategia de versionado elegida
 
-**Versión en la URL** (`/api/v1/...` → `/api/v2/...` cuando aplique), por ser la estrategia ya establecida de facto en los 3 backends (todos los endpoints actuales ya viven bajo `/api/v1/`) y la más simple/visible de las tres opciones aceptadas.
+**Versión en la URL** (`/api/v1/...` → `/api/v2/...`), por ser la estrategia ya establecida de facto en los 3 backends (todos los endpoints ya vivían bajo `/api/v1/`) y la más simple/visible de las tres opciones aceptadas.
 
-**Estado de implementación actual**: este documento formaliza el corte v1/v2 **a nivel de changelog y número de versión** (`package.json`, Swagger `info.version` → `2.0.0` en los 3 backends). **No** se desdobló la URL en `/api/v2/` todavía — los 3 breaking changes de la tabla anterior ya están desplegados como la única versión activa, y los 4 consumidores del ecosistema (los propios repos, todos bajo control directo) ya fueron actualizados en el mismo movimiento. No existe hoy un consumidor externo desconocido corriendo contra la forma vieja del contrato.
+**Estado de implementación**: implementada en su totalidad. Los 3 backends renombraron **todas** sus rutas de `/api/v1/*` a `/api/v2/*` (mounts en `app.js`, adaptadores S2S internos, URLs embebidas en respuestas, Swagger, webhooks salientes/entrantes) — sin mantener un alias en `/api/v1/` (una petición a esa ruta hoy devuelve 404). No se optó por exponer ambas versiones en paralelo porque el comportamiento que servía `/api/v1/` ya no existe en el código: los 3 breaking changes de la tabla anterior reemplazaron ese comportamiento por completo, así que un alias en `/api/v1/` habría ejecutado exactamente el mismo código que `/api/v2/` bajo un nombre engañoso, sin restaurar nada del contrato viejo. Los 4 consumidores del ecosistema (los propios repos, todos bajo control directo) se actualizaron en el mismo movimiento — no existe hoy un consumidor externo desconocido corriendo contra la forma vieja del contrato.
 
-Esto es una desviación consciente del proceso ideal (ver §5, "Nota de gobierno") — se documenta explícitamente en vez de ocultarla.
+Verificado end-to-end tras el despliegue: `/api/v2/*` responde correctamente en los 3 backends (login, médicos, pacientes, validar cobertura, health), `/api/v1/*` devuelve 404 limpio, el bundle del frontend desplegado no contiene ninguna referencia a `/api/v1` y sí a `/api/v2`, y el stream SSE (`/api/v2/realtime/stream`, sensible a la configuración de `nginx.conf`) conecta y entrega eventos reales sin cortes.
 
 ---
 
