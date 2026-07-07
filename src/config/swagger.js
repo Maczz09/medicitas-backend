@@ -6,7 +6,7 @@ const options = {
     openapi: '3.0.0',
     info: {
       title: 'MediCitas API',
-      version: '1.0.0',
+      version: '2.0.0',
       description: 'API central de MediCitas para la gestión de citas y atenciones médicas',
     },
     servers: [
