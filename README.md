@@ -15,13 +15,14 @@ El ecosistema completo incluye dos APIs externas independientes (`farmacia-api` 
 5. [Workers](#workers)
 6. [Resiliencia](#resiliencia)
 7. [Seguridad](#seguridad)
-8. [Tiempo real (SSE)](#tiempo-real-sse)
-9. [Observabilidad](#observabilidad)
-10. [Seguridad ofensiva — OWASP ZAP](#seguridad-ofensiva--owasp-zap)
-11. [Infraestructura Docker](#infraestructura-docker)
-12. [Variables de entorno](#variables-de-entorno)
-13. [Instalación y ejecución](#instalación-y-ejecución)
-14. [Comandos](#comandos)
+8. [Manejo de errores](#manejo-de-errores)
+9. [Tiempo real (SSE)](#tiempo-real-sse)
+10. [Observabilidad](#observabilidad)
+11. [Seguridad ofensiva — OWASP ZAP](#seguridad-ofensiva--owasp-zap)
+12. [Infraestructura Docker](#infraestructura-docker)
+13. [Variables de entorno](#variables-de-entorno)
+14. [Instalación y ejecución](#instalación-y-ejecución)
+15. [Comandos](#comandos)
 
 ---
 
@@ -104,6 +105,8 @@ Todos los endpoints cuelgan de `/api/v1/` detrás del gateway Nginx (puerto `80`
 
 Los webhooks entrantes se autentican con un **secreto compartido bidireccional**: la misma `FARMACIA_API_KEY` / `ASEGURADORA_API_KEY` que MediCitas usa para llamar a esas APIs, autentica también las llamadas en sentido inverso (header `X-Webhook-Api-Key`, comparación constant-time vía `crypto.timingSafeEqual`, fail-closed si la env var no está configurada). Ver `src/shared/infrastructure/webhooks/verifyWebhookApiKey.middleware.js`.
 
+**Outbox local de webhooks salientes** (en farmacia-api y aseguradora-prosalud-api): si la entrega inmediata a MediCitas falla tras los reintentos en memoria (axios-retry), el evento se encola en una tabla `webhooks_salientes` local en vez de perderse. Un worker en background (cada 30s) reintenta con backoff exponencial (30s→1h tope), hasta 20 intentos antes de marcar `FALLIDO_PERMANENTE` para reconciliación manual — así un cambio de estado (receta retirada, póliza actualizada) nunca se pierde por una caída transitoria de MediCitas, incluida durante un deploy.
+
 **Toggle mock/real** (no tocar en producción sin confirmar con el equipo):
 ```
 USE_MOCK_SEGURO=false     # false → llama a aseguradora-prosalud-api real
@@ -114,6 +117,8 @@ USE_MOCK_SMS=<sin setear> # sin definir → usa WhatsApp Web real (Puppeteer); '
 ### Idempotencia
 
 Header `Idempotency-Key` (UUID) soportado en operaciones críticas (reserva de citas, validar cobertura, reintentar receta, marcar retirada). Se registra en `medicitas_users.peticiones_idempotentes`; una segunda petición con la misma clave devuelve la respuesta cacheada sin reprocesar. Middleware: `src/shared/infrastructure/api_idempotency.middleware.js`.
+
+En **`POST /citas`** y **`POST /pagos`** el header es **obligatorio** (`requireIdempotencyKey` — 400 `IDEMPOTENCY_KEY_REQUERIDA` si falta): son operaciones con efectos de negocio caros de deshacer (bloquear un slot de agenda, registrar un cobro), así que un doble clic o un reintento de red nunca debe poder duplicarlas. El frontend genera la clave con `crypto.randomUUID()` en el cliente HTTP (`src/api/citas.api.ts`, `src/api/pagos.api.ts`) si no se provee una explícita.
 
 ### Correlation ID
 
@@ -166,6 +171,10 @@ Además, dentro del **propio proceso del backend** (no en `workers`) corren:
 | DLQ + retry acotado | Los 4 consumers RabbitMQ | Ver [Comunicación entre servicios](#comunicación-entre-servicios) |
 | Bulkhead | Gateways HTTP externos | `http.Agent`/`https.Agent` propio con `maxSockets: 20` — aísla el pool de sockets del resto de llamadas salientes del proceso |
 | nginx resiliente a reinicios | `nginx/nginx.conf` | `resolver 127.0.0.11 valid=10s` + variable en `proxy_pass` — sin esto, nginx resuelve el hostname del backend una sola vez al arrancar y queda con una IP muerta (502) tras cualquier reinicio del backend |
+| Timeout en WhatsApp `sendMessage` | `WhatsappWebJSAdapter.js` | `Promise.race` con `WA_SEND_TIMEOUT_MS` (default 20s) — Chromium/whatsapp-web.js pueden colgarse sin resolver la promesa; sin timeout, el consumer de notificaciones quedaría bloqueado indefinidamente |
+| Compensaciones idempotentes | `ReversarPagoUseCase`, `alertas_llegada.cron.js` | Reversar un pago cancela la cita asociada (libera agenda del médico); una cita expirada a `No_Asistida` libera su slot en Redis. Best-effort, no bloquean la operación principal si el compensador falla |
+| Acoplar pago↔cita (opcional) | `RegistrarIngresoUseCase` | `REQUERIR_PAGO_PARA_INGRESO=true` exige un pago aprobado antes de admitir al paciente; fail-safe si Pagos no responde (no bloquea la atención clínica por una caída de Pagos). Default `false` |
+| Outbox local de webhooks salientes | farmacia-api, aseguradora-api | Ver [APIs externas](#apis-externas-farmacia-api-aseguradora-prosalud-api) |
 
 ---
 
@@ -174,11 +183,34 @@ Además, dentro del **propio proceso del backend** (no en `workers`) corren:
 - **JWT** (HS256, `JWT_SECRET`) con access token (`JWT_EXPIRES_IN`, default 8h) + refresh token opaco rotado en cada uso.
 - **OTP** por correo (Nodemailer) para reseteo de contraseña.
 - **RBAC**: roles `Recepcionista`, `Médico`, `Auditor`, `INTERNAL` (bypasea cualquier restricción de rol — reservado para tráfico S2S con `INTERNAL_SERVICE_TOKEN`).
+- **Autorización a nivel de recurso** (no solo rol): un médico solo puede operar sus propios horarios/bloqueos y registrar encuentros clínicos de sus propias citas — `resourceAuth.middleware.js` (`soloMedicoPropietario`) e IDOR check explícito en `RegistrarConsultaUseCase`.
 - **Idempotency-Key** — ver arriba.
 - **Webhooks entrantes** autenticados con secreto compartido — ver arriba.
+- **PII enmascarada en logs**: documento, teléfono y email nunca se loguean en texto plano (`src/shared/infrastructure/pii.js`) — aplicado en notificaciones SMS/WhatsApp/email y validación de seguros.
 - **Helmet** + CSP headers vía nginx (`Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Permissions-Policy`).
 - **CORS** habilitado a nivel de Express.
 - **Bloqueo de cuenta**: 3 intentos fallidos → lockout 15 minutos.
+
+---
+
+## Manejo de errores
+
+Envelope de error unificado en los 3 backends del ecosistema (medicitas-backend, farmacia-api, aseguradora-prosalud-api):
+
+```json
+{
+  "codigo": "VALIDACION_FALLIDA",
+  "mensaje": "Uno o más campos son inválidos.",
+  "detalles": [{ "campo": "cantidad", "mensaje": "cantidad debe ser mayor a 0" }],
+  "correlationId": "a1b2c3d4-...",
+  "timestamp": "2026-07-07T12:00:00.000Z"
+}
+```
+
+- **`DomainError`** (`src/shared/domain/errors.js`) — clase de error con `codigo`, `status` HTTP y `detalles` opcionales; los use cases la lanzan en vez de `res.status().json()` manual.
+- **`error.middleware.js`** — handler global único: mapea `DomainError` al envelope, detecta JSON malformado (`entity.parse.failed` → 400, nunca 500) y cualquier excepción no controlada cae a 500 sin exponer stack/SQL/rutas internas al cliente (sí se loguea completo internamente).
+- **Validación con Zod** (`src/shared/infrastructure/schemas.js` + `validate.middleware.js`) en los endpoints críticos de escritura (citas, pagos, pacientes, historia clínica, seguros) — `detalles` trae un error por campo, nunca un 500 por body inválido.
+- `detalles` **nunca** incluye PII sin enmascarar ni información interna (stack traces, queries SQL, rutas de archivo).
 
 ---
 
@@ -227,7 +259,13 @@ En Grafana → Explore → datasource Jaeger, o directo en http://localhost:1668
 
 ### Métricas (Prometheus)
 
-`GET /metrics` (backend) expone métricas vía `prom-client`: contadores HTTP, histogramas de latencia, gauges de conexiones activas. Scrape config en `monitoring/prometheus.yml`.
+Prometheus scrapea `/metrics` de **los 3 servicios** (`monitoring/prometheus.yml`, jobs `medicitas-backend`, `farmacia-api`, `aseguradora-api`) — el servicio `prometheus` está unido tanto a `medicitas_net` como a `medicitas_shared_net` para poder alcanzar los stacks Docker independientes de farmacia/aseguradora. Todas las queries de los dashboards de medicitas-backend filtran explícitamente `{job="medicitas-backend"}`: como los 3 servicios exponen métricas HTTP genéricas con el mismo nombre (`http_requests_total`, etc.), sin el filtro se mezclarían.
+
+Cada servicio expone, además de las métricas HTTP estándar (`prom-client`), contadores de negocio propios: `medicitas_*` (citas, pagos, seguros, prescripciones — ver `src/config/metrics.js`), `farmacia_recetas_*`, `aseguradora_validaciones_cobertura_total`/`aseguradora_asegurados_registrados_total`, y `webhooks_salientes_pendientes` (gauge de saturación del outbox de webhooks en farmacia-api/aseguradora-api).
+
+**Dashboards como código** (`monitoring/grafana/dashboards/*.json`, auto-provisionados): `medicitas.json` y `operativo.json` (medicitas-backend), `servicios-externos.json` (farmacia-api + aseguradora-api — requests/error-rate/latencia por servicio, métricas de negocio, saturación del outbox de webhooks, logs).
+
+**Alertas** (`monitoring/alert.rules.yml`): grupo `medicitas-operativo` (latencia, tasa de error, Circuit Breaker, saturación de outbox interno) y grupo `servicios-externos` (`ServicioExternoCaido` si `up == 0`, `HighErrorRateServicioExterno`, `WebhooksSalientesSaturados`) — cada regla documenta `impact` (a quién afecta) y `runbook` (qué hacer), no solo el umbral.
 
 ---
 
