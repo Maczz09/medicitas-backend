@@ -3,7 +3,7 @@ class DomainError extends Error {
   //   new DomainError(codigo, mensaje, status)   ← clases base de abajo
   //   new DomainError(codigo, status, mensaje)   ← módulos seguros/pagos/facturación
   // Se detecta cuál es el número (status) y cuál el texto (mensaje).
-  constructor(codigo, arg2, arg3) {
+  constructor(codigo, arg2, arg3, detalles) {
     let mensaje;
     let status;
     if (typeof arg2 === 'number') {
@@ -19,6 +19,9 @@ class DomainError extends Error {
     this.code = codigo; // alias usado por algunos call sites
     this.status = status || 400;
     this.httpStatus = this.status; // alias usado por algunos call sites
+    // Errores por campo para validación (los incluye el error handler global
+    // en el envelope como `detalles`).
+    if (detalles) this.detalles = detalles;
   }
 }
 

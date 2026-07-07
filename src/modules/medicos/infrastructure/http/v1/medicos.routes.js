@@ -2,6 +2,7 @@ const router = require('express').Router();
 const controller = require('./medicos.controller');
 const { verifyToken } = require('../../../../../shared/infrastructure/auth.middleware');
 const { requireRole } = require('../../../../../shared/infrastructure/rbac.middleware');
+const { soloMedicoPropietario } = require('../../../../../shared/infrastructure/resourceAuth.middleware');
 
 /**
  * @swagger
@@ -61,8 +62,8 @@ router.post('/', verifyToken, requireRole('Auditor'), controller.createMedico);
  */
 router.get('/:id/disponibilidad', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), controller.getDisponibilidad);
 router.get('/:id/slots', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), controller.getSlotsForDate);
-router.post('/:id/horarios', verifyToken, requireRole('Médico', 'Auditor'), controller.registrarHorarios);
-router.post('/:id/bloqueos', verifyToken, requireRole('Médico', 'Auditor'), controller.registrarBloqueo);
+router.post('/:id/horarios', verifyToken, requireRole('Médico', 'Auditor'), soloMedicoPropietario('id'), controller.registrarHorarios);
+router.post('/:id/bloqueos', verifyToken, requireRole('Médico', 'Auditor'), soloMedicoPropietario('id'), controller.registrarBloqueo);
 
 // CRUD completo de médicos (Auditor)
 router.get('/:id', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), controller.getById);

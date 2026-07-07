@@ -13,7 +13,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[1m]))",
+          "expr": "sum(rate(http_requests_total{job=\"medicitas-backend\"}[1m]))",
           "legendFormat": "req/s"
         }
       ]
@@ -25,7 +25,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(http_request_errors_total[1m])) / sum(rate(http_requests_total[1m])) * 100",
+          "expr": "sum(rate(http_request_errors_total{job=\"medicitas-backend\"}[1m])) / sum(rate(http_requests_total{job=\"medicitas-backend\"}[1m])) * 100",
           "legendFormat": "% errores"
         }
       ],
@@ -49,7 +49,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"medicitas-backend\"}[5m])) by (le))",
           "legendFormat": "p95"
         }
       ],
@@ -73,7 +73,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "targets": [
         {
-          "expr": "http_active_connections",
+          "expr": "http_active_connections{job=\"medicitas-backend\"}",
           "legendFormat": "activas"
         }
       ]
@@ -85,7 +85,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         {
-          "expr": "sum by (route, method) (rate(http_requests_total[1m]))",
+          "expr": "sum by (route, method) (rate(http_requests_total{job=\"medicitas-backend\"}[1m]))",
           "legendFormat": "{{method}} {{route}}"
         }
       ]
@@ -97,15 +97,15 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"medicitas-backend\"}[5m])) by (le))",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"medicitas-backend\"}[5m])) by (le))",
           "legendFormat": "p95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"medicitas-backend\"}[5m])) by (le))",
           "legendFormat": "p99"
         }
       ],
@@ -118,11 +118,11 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "targets": [
         {
-          "expr": "process_cpu_seconds_total",
+          "expr": "process_cpu_seconds_total{job=\"medicitas-backend\"}",
           "legendFormat": "CPU total (s)"
         },
         {
-          "expr": "process_resident_memory_bytes / 1024 / 1024",
+          "expr": "process_resident_memory_bytes{job=\"medicitas-backend\"} / 1024 / 1024",
           "legendFormat": "RSS (MB)"
         }
       ]
@@ -134,7 +134,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "targets": [
         {
-          "expr": "sum by (status_code) (rate(http_request_errors_total[1m]))",
+          "expr": "sum by (status_code) (rate(http_request_errors_total{job=\"medicitas-backend\"}[1m]))",
           "legendFormat": "HTTP {{status_code}}"
         }
       ]

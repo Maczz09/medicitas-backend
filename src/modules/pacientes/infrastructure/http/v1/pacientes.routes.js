@@ -2,6 +2,8 @@ const router = require('express').Router();
 const controller = require('./pacientes.controller');
 const { verifyToken } = require('../../../../../shared/infrastructure/auth.middleware');
 const { requireRole } = require('../../../../../shared/infrastructure/rbac.middleware');
+const { validate } = require('../../../../../shared/infrastructure/validate.middleware');
+const { crearPacienteSchema } = require('../../../../../shared/infrastructure/schemas');
 
 /**
  * @swagger
@@ -102,7 +104,7 @@ router.get('/:id', verifyToken, requireRole('Recepcionista', 'Auditor', 'Médico
  *       201:
  *         description: Paciente registrado con éxito
  */
-router.post('/', verifyToken, requireRole('Recepcionista', 'Auditor'), controller.create);
+router.post('/', verifyToken, requireRole('Recepcionista', 'Auditor'), validate(crearPacienteSchema), controller.create);
 
 /**
  * @swagger

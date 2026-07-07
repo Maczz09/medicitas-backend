@@ -1,8 +1,9 @@
 const logger = require('../../../../../shared/logger/logger');
+const { maskTelefono } = require('../../../../../shared/infrastructure/pii');
 
 class SMSMockAdapter {
   async enviar({ telefono, mensaje, idMensaje }) {
-    logger.info({ telefono, idMensaje, largo: mensaje.length },
+    logger.info({ telefono: maskTelefono(telefono), idMensaje, largo: mensaje.length },
       '[MOCK] Simulando envío de SMS');
 
     await this._simularLatencia(80, 250);

@@ -1,6 +1,9 @@
 const { Router } = require('express');
 const { requireRole } = require('../../../shared/infrastructure/rbac.middleware');
 const { verifyToken } = require('../../../shared/infrastructure/auth.middleware');
+const { validate } = require('../../../shared/infrastructure/validate.middleware');
+const { confirmarPagoSchema } = require('../../../shared/infrastructure/schemas');
+const { requireIdempotencyKey } = require('../../../shared/infrastructure/api_idempotency.middleware');
 
 const { PagosMySQLRepository }    = require('../adapters/out/repositories/PagosMySQLRepository');
 const { CitaHttpAdapter }         = require('../adapters/out/http/CitaHttpAdapter');
@@ -29,6 +32,7 @@ const controller = new PagosController({
   }),
   reversarUseCase: new ReversarPagoUseCase({
     pagosRepository: repo, eventPublisher: outbox, getConnection: connFn,
+    citaCompensador: cita,
   }),
   consultarUseCase:      new ConsultarPagoUseCase({ pagosRepository: repo }),
   consultarPorCitaUseCase: new ConsultarPagoPorCitaUseCase({ pagosRepository: repo }),
@@ -109,7 +113,7 @@ router.get('/', verifyToken, requireRole('RECEPCIONISTA', 'Auditor'), async (req
  *       400:
  *         description: Datos inválidos o error de dominio
  */
-router.post('/',              verifyToken, requireRole('RECEPCIONISTA', 'Auditor'),          controller.confirmar);
+router.post('/',              verifyToken, requireRole('RECEPCIONISTA', 'Auditor'), requireIdempotencyKey, validate(confirmarPagoSchema), controller.confirmar);
 
 /**
  * @swagger

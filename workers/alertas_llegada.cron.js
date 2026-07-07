@@ -1,6 +1,26 @@
 const cron = require('node-cron');
 const db   = require('../src/config/database');
 const crypto = require('crypto');
+const { client: redisClient } = require('../src/config/redis');
+const { DisponibilidadRedisCache } = require('../src/modules/citas/adapters/out/cache/DisponibilidadRedisCache');
+
+// Este proceso (PM2 worker-alertas-llegada) no conectaba Redis. Se conecta de
+// forma perezosa y defensiva para poder liberar el slot de agenda cuando una
+// cita expira a No_Asistida — misma compensación que hace CancelarCitaUseCase.
+// Si Redis no está disponible, el TTL de la caché (~5 min) + el constraint
+// UNIQUE en BD son la red de seguridad final, así que no se bloquea el cron.
+let _cacheDisponibilidad = null;
+async function getCacheDisponibilidad() {
+  if (_cacheDisponibilidad) return _cacheDisponibilidad;
+  try {
+    if (!redisClient.isOpen) await redisClient.connect();
+    _cacheDisponibilidad = new DisponibilidadRedisCache(null);
+    return _cacheDisponibilidad;
+  } catch (err) {
+    console.warn('[AlertasLlegada] Redis no disponible para liberar slot:', err.message);
+    return null;
+  }
+}
 
 function fmtHora(fecha) {
   return new Date(fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -100,6 +120,14 @@ async function processAlertasYExpiracion() {
         
         await conn.commit();
         console.log(`[AlertasLlegada] Cita ${cita.id} → No_Asistida`);
+
+        // Compensación: liberar el slot de la agenda del médico (idempotente).
+        try {
+          const cache = await getCacheDisponibilidad();
+          if (cache) await cache.liberarSlot(cita.id_medico, new Date(cita.fecha_hora));
+        } catch (err) {
+          console.warn(`[AlertasLlegada] No se pudo liberar slot de cita ${cita.id}:`, err.message);
+        }
 
       } else if (diffMin >= 10 && !cita.alerta_min10) {
         await conn.execute('UPDATE svc_cit.citas SET alerta_min10 = 1 WHERE id = ?', [cita.id]);

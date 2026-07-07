@@ -37,6 +37,20 @@ class RegistrarConsultaUseCase {
       throw new DomainError('CITA_NO_EN_ATENCION', `La cita ${dto.idCita} debe estar en curso`, 409);
     }
 
+    // Autorización a nivel de recurso: un Médico solo puede registrar
+    // encuentros de SUS propias citas (no de las de otro médico). El Auditor
+    // queda exento (supervisión). Sin esta validación, cualquier médico
+    // autenticado podía escribir en el expediente clínico de citas ajenas.
+    const rol = String(dto.rolUsuario || '').toUpperCase();
+    const esMedico = rol === 'MÉDICO' || rol === 'MEDICO';
+    if (esMedico && estadoCita.idMedico && estadoCita.idMedico !== dto.idMedico) {
+      throw new DomainError(
+        'CITA_DE_OTRO_MEDICO',
+        403,
+        'No puedes registrar encuentros clínicos de citas asignadas a otro médico.'
+      );
+    }
+
     const expediente = await this.expedienteRepository.findByIdPaciente(dto.idPaciente);
     if (!expediente) {
       throw new DomainError('EXPEDIENTE_NO_ENCONTRADO', `No existe expediente para ${dto.idPaciente}`, 404);

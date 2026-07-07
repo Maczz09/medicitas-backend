@@ -1,5 +1,6 @@
 const logger = require('../../../../shared/logger/logger');
 const { EstadoSMS } = require('../../domain/entities/MensajeSMS');
+const { maskTelefono } = require('../../../../shared/infrastructure/pii');
 
 class ProcesarMensajesPendientesUseCase {
   constructor({ mensajesSMSRepository, getConnection, getGateway }) {
@@ -35,7 +36,7 @@ class ProcesarMensajesPendientesUseCase {
           msg.marcarComoEnviado(resultado.referencia);
           await this.smsRepo.update(msg);
 
-          logger.info({ idMensaje: msg.id, destino: msg.telefono }, '[ProcesarPendientes] Mensaje pendiente enviado correctamente.');
+          logger.info({ idMensaje: msg.id, destino: maskTelefono(msg.telefono) }, '[ProcesarPendientes] Mensaje pendiente enviado correctamente.');
         } catch (err) {
           if (err.name === 'WhatsAppNotLinkedError') {
             // Se desvinculó de nuevo mientras enviábamos, frenar el loop

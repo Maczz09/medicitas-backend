@@ -1,0 +1,134 @@
+{
+  "title": "Servicios Externos: Farmacia + Aseguradora",
+  "uid": "servicios-externos",
+  "tags": ["farmacia", "aseguradora", "negocio", "sre"],
+  "schemaVersion": 38,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Requests por segundo, por servicio",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (job) (rate(http_requests_total{job=~\"farmacia-api|aseguradora-api\"}[1m]))",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Tasa de error (4xx+5xx), por servicio",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (job) (rate(http_request_errors_total{job=~\"farmacia-api|aseguradora-api\"}[5m])) / sum by (job) (rate(http_requests_total{job=~\"farmacia-api|aseguradora-api\"}[5m])) * 100",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" } }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Latencia p95, por servicio",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, job) (rate(http_request_duration_seconds_bucket{job=~\"farmacia-api|aseguradora-api\"}[5m])))",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Webhooks salientes pendientes (Outbox)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 7 },
+      "targets": [
+        {
+          "expr": "webhooks_salientes_pendientes",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Recetas procesadas (Farmacia)",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 14 },
+      "targets": [
+        {
+          "expr": "farmacia_recetas_procesadas_total",
+          "legendFormat": "{{resultado}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Recetas resueltas en mostrador (Farmacia)",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 14 },
+      "targets": [
+        {
+          "expr": "farmacia_recetas_retiro_total",
+          "legendFormat": "{{resultado}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Validaciones de cobertura (Aseguradora)",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 14 },
+      "targets": [
+        {
+          "expr": "aseguradora_validaciones_cobertura_total",
+          "legendFormat": "{{resultado}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Asegurados registrados",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "aseguradora_asegurados_registrados_total",
+          "legendFormat": "total"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "logs",
+      "title": "Logs Farmacia + Aseguradora",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{app=~\"farmacia-api|aseguradora-api\"} |= \"\"",
+          "queryType": "range"
+        }
+      ]
+    }
+  ]
+}

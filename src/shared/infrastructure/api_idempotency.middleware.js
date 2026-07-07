@@ -1,4 +1,22 @@
 const db = require('../../config/database');
+const { DomainError } = require('../domain/errors');
+
+/**
+ * Exige que la petición traiga el header `Idempotency-Key`. Se aplica a
+ * operaciones críticas reintentables (cobros, reservas) donde procesar un
+ * duplicado tiene consecuencias reales (doble cobro, doble reserva).
+ * Debe ir ANTES de checkIdempotency en la cadena de la ruta.
+ */
+function requireIdempotencyKey(req, res, next) {
+  if (!req.headers['idempotency-key']) {
+    return next(new DomainError(
+      'IDEMPOTENCY_KEY_REQUERIDA',
+      400,
+      'Esta operación requiere el header Idempotency-Key para evitar duplicados.'
+    ));
+  }
+  next();
+}
 
 async function checkIdempotency(req, res, next) {
   if (req.method === 'GET' || req.method === 'OPTIONS') {
@@ -66,4 +84,4 @@ async function checkIdempotency(req, res, next) {
   }
 }
 
-module.exports = { checkIdempotency };
+module.exports = { checkIdempotency, requireIdempotencyKey };

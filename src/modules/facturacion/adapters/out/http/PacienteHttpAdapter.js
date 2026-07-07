@@ -5,7 +5,7 @@ const logger = require('../../../../../shared/logger/logger');
 class PacienteHttpAdapter {
   constructor() {
     this.baseUrl = process.env.APP_INTERNAL_BASE_URL || 'http://localhost:3000';
-    this.internalToken = process.env.INTERNAL_SERVICE_TOKEN || 'internal-secret-token';
+    this.internalToken = process.env.INTERNAL_SERVICE_TOKEN?.trim();
   }
 
   async obtenerNombre(idPaciente) {

@@ -2,7 +2,9 @@ const express = require('express');
 const { verifyToken } = require('../../../../../shared/infrastructure/auth.middleware');
 const { requireRole } = require('../../../../../shared/infrastructure/rbac.middleware');
 const { correlationMiddleware } = require('../../../../../shared/infrastructure/correlation.middleware');
-const { checkIdempotency } = require('../../../../../shared/infrastructure/api_idempotency.middleware');
+const { checkIdempotency, requireIdempotencyKey } = require('../../../../../shared/infrastructure/api_idempotency.middleware');
+const { validate } = require('../../../../../shared/infrastructure/validate.middleware');
+const { crearCitaSchema } = require('../../../../../shared/infrastructure/schemas');
 
 // Inyección de dependencias manual (o con un contenedor)
 const { CitasController } = require('./citas.controller');
@@ -17,6 +19,7 @@ const { ReservarCitaUseCase } = require('../../../application/use-cases/Reservar
 const { CancelarCitaUseCase } = require('../../../application/use-cases/CancelarCitaUseCase');
 const { ReprogramarCitaUseCase } = require('../../../application/use-cases/ReprogramarCitaUseCase');
 const { RegistrarIngresoUseCase } = require('../../../application/use-cases/RegistrarIngresoUseCase');
+const { PagoHttpAdapter } = require('../../../adapters/out/http/PagoHttpAdapter');
 const { RevertirIngresoUseCase } = require('../../../application/use-cases/RevertirIngresoUseCase');
 const { CompletarCitaUseCase } = require('../../../application/use-cases/CompletarCitaUseCase');
 const { ConsultarCitaUseCase } = require('../../../application/use-cases/ConsultarCitaUseCase');
@@ -58,7 +61,8 @@ const reprogramarCitaUseCase = new ReprogramarCitaUseCase({
 const registrarIngresoUseCase = new RegistrarIngresoUseCase({
   citasRepository: citasRepo,
   eventPublisher,
-  getConnection
+  getConnection,
+  pagoValidator: new PagoHttpAdapter(),
 });
 
 const revertirIngresoUseCase = new RevertirIngresoUseCase({
@@ -177,7 +181,9 @@ router.get('/', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'),
 router.post('/',
   verifyToken,
   requireRole(['Recepcionista', 'Auditor']),
+  requireIdempotencyKey,
   checkIdempotency,
+  validate(crearCitaSchema),
   controller.reservarCita
 );
 

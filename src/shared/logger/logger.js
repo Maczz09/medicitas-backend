@@ -45,11 +45,14 @@ const transport = usarLoki
 
 const pinoLogger = pino({
   level: process.env.LOG_LEVEL || 'info',
-  formatters: {
-    level: (label) => {
-      return { level: label.toUpperCase() };
-    },
-  },
+  // NUNCA usar formatters.level con pino.transport({ targets: [...] }):
+  // el filtrado por nivel de cada target compara internamente el nivel
+  // NUMÉRICO original — si formatters.level lo reescribe a string ('INFO')
+  // antes de que el mensaje se despache a los worker threads, la comparación
+  // falla en silencio y CADA mensaje se descarta sin ningún error visible
+  // (ni en stdout ni en Loki). Costó un buen rato diagnosticarlo porque no
+  // hay excepción ni log de fallo — simplemente nada llega a ningún lado.
+  //
   // pino-loki necesita `time` numérico (epoch ms) para construir el timestamp
   // del push; con isoTime genera NaN y Loki rechaza TODOS los lotes.
   timestamp: usarLoki ? pino.stdTimeFunctions.epochTime : pino.stdTimeFunctions.isoTime,

@@ -3,6 +3,8 @@ const { verifyToken } = require('../../../shared/infrastructure/auth.middleware'
 const { requireRole } = require('../../../shared/infrastructure/rbac.middleware');
 const { correlationMiddleware } = require('../../../shared/infrastructure/correlation.middleware');
 const { checkIdempotency } = require('../../../shared/infrastructure/api_idempotency.middleware');
+const { validate } = require('../../../shared/infrastructure/validate.middleware');
+const { validarCoberturaSchema } = require('../../../shared/infrastructure/schemas');
 
 const { SegurosController } = require('../adapters/in/SegurosController');
 const { CoberturasMySQLRepository } = require('../adapters/out/repositories/CoberturasMySQLRepository');
@@ -171,6 +173,7 @@ router.post('/validar',
   verifyToken,
   requireRole(['Recepcionista', 'Auditor', 'INTERNAL']),
   checkIdempotency,
+  validate(validarCoberturaSchema),
   controller.validarCobertura
 );
 

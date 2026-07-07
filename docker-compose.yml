@@ -202,6 +202,9 @@ services:
       - backend
     networks:
       - medicitas_net
+      # Permite scrapear farmacia-api y aseguradora-prosalud-api, que corren
+      # en stacks Docker propios y solo son alcanzables por esta red puente.
+      - medicitas_shared_net
 
   # ─── ALERTMANAGER ─────────────────────────────────────────
   alertmanager:

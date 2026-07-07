@@ -30,9 +30,9 @@ class CitaHttpAdapter {
           timeout: 3000,
         }
       ));
-      // Asumiendo que el endpoint de citas devuelve { data: { estado: ... } }
-      const estado = data.data ? data.data.estado : data.estado;
-      return { estado };
+      // El endpoint puede devolver { data: {...} } o el objeto plano.
+      const cita = data.data ? data.data : data;
+      return { estado: cita.estado, idMedico: cita.idMedico ?? cita.id_medico ?? null };
 
     } catch (error) {
       console.error('ERROR EN AXIOS CitaHttpAdapter:', error.message);

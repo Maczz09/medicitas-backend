@@ -5,6 +5,7 @@ const { crearCircuitBreaker }   = require('./circuit-breaker/circuitBreakerConfi
 const { conRetryYFallback }     = require('../../../../../shared/resilience/retryConBackoffJitter');
 const { RespuestaSanitizer }    = require('./sanitizer/RespuestaSanitizer');
 const logger = require('../../../../../shared/logger/logger');
+const { maskDocumento } = require('../../../../../shared/infrastructure/pii');
 
 /**
  * AseguradoraAxiosAdapter — Gateway HTTP hacia aseguradora-prosalud-api.
@@ -93,7 +94,7 @@ class AseguradoraAxiosAdapter {
 
   // ── Llamada HTTP real (envuelta por el Circuit Breaker) ───────────────────
   async _llamadaReal({ tipoDocumento, numeroDocumento }) {
-    logger.info({ tipoDocumento, numeroDocumento }, '[AseguradoraAxiosAdapter] Llamando a API Aseguradora');
+    logger.info({ tipoDocumento, numeroDocumento: maskDocumento(numeroDocumento) }, '[AseguradoraAxiosAdapter] Llamando a API Aseguradora');
 
     const { data } = await this.client.get('/asegurados/validar', {
       params: { tipoDocumento, numeroDocumento },

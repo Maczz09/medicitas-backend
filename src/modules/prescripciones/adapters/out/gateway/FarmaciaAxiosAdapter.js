@@ -115,7 +115,7 @@ class FarmaciaAxiosAdapter {
     // errorFilter los excluye del conteo de fallas del breaker, pero siguen propagándose.
     if (response.status === 400 || response.status === 401) {
       logger.warn({ idReceta, status: response.status }, '[FarmaciaAxiosAdapter] Error de configuración (no cuenta para CB)');
-      const err = new Error(response.data?.motivo || `Error de cliente HTTP ${response.status} desde farmacia-api`);
+      const err = new Error(response.data?.mensaje || response.data?.motivo || `Error de cliente HTTP ${response.status} desde farmacia-api`);
       err.esErrorDeConfiguracion = true;
       throw err;
     }

@@ -1,4 +1,6 @@
 const nodemailer = require('nodemailer');
+const logger = require('../logger/logger');
+const { maskEmail } = require('./pii');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -30,9 +32,9 @@ class MailerService {
 
     try {
       await transporter.sendMail(mailOptions);
-      console.log(`[Mailer] Código OTP enviado a ${email}`);
+      logger.info({ destino: maskEmail(email) }, '[Mailer] Código OTP enviado');
     } catch (error) {
-      console.error('[Mailer] Error al enviar el correo:', error);
+      logger.error({ err: error.message }, '[Mailer] Error al enviar el correo');
       throw new Error('Fallo al enviar correo electrónico');
     }
   }

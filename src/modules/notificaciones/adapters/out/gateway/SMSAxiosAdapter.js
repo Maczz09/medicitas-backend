@@ -2,6 +2,7 @@ const axios = require('axios');
 const { crearCircuitBreakerSMS } = require('./circuit-breaker/smsCBConfig');
 const { DomainError }            = require('../../../../../shared/domain/errors');
 const logger = require('../../../../../shared/logger/logger');
+const { maskTelefono } = require('../../../../../shared/infrastructure/pii');
 
 class SMSAxiosAdapter {
   constructor() {
@@ -15,7 +16,7 @@ class SMSAxiosAdapter {
     } catch (err) {
       // El Circuit Breaker ya está abierto o falló la llamada
       // Propagar para que el use case lo trate como FALLIDO
-      logger.error({ err, telefono }, 'SMSAxiosAdapter: fallo al enviar SMS');
+      logger.error({ err, telefono: maskTelefono(telefono) }, 'SMSAxiosAdapter: fallo al enviar SMS');
       throw err;
     }
   }

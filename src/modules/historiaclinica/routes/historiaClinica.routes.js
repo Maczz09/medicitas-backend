@@ -1,6 +1,8 @@
 const { Router } = require('express');
 const { verifyToken } = require('../../../shared/infrastructure/auth.middleware');
 const { requireRole } = require('../../../shared/infrastructure/rbac.middleware');
+const { validate } = require('../../../shared/infrastructure/validate.middleware');
+const { registrarEncuentroSchema } = require('../../../shared/infrastructure/schemas');
 
 // Instanciar dependencias (Dependency Injection manual)
 const { ExpedienteMySQLRepository }  = require('../adapters/out/repositories/ExpedienteMySQLRepository');
@@ -166,7 +168,7 @@ router.get( '/:idPaciente/encuentros', requireRole('Médico', 'Auditor'), contro
  *       201:
  *         description: Encuentro clínico registrado con éxito
  */
-router.post('/:idPaciente/encuentros', requireRole('Médico', 'Auditor'), controller.registrarEncuentro);
+router.post('/:idPaciente/encuentros', requireRole('Médico', 'Auditor'), validate(registrarEncuentroSchema), controller.registrarEncuentro);
 
 router.patch('/:idPaciente/expediente', requireRole('Médico', 'Recepcionista', 'Auditor'), async (req, res, next) => {
   try {

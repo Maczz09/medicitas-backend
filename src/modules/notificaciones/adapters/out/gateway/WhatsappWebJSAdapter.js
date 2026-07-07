@@ -5,6 +5,7 @@ const logger = require('../../../../../shared/logger/logger');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { maskTelefono } = require('../../../../../shared/infrastructure/pii');
 
 const STATUS_CALLBACK = process.env.APP_PUBLIC_URL
   ? `${process.env.APP_PUBLIC_URL}/api/v1/webhooks/twilio/status`
@@ -37,8 +38,20 @@ function limpiarLocksHuerfanos(dataPath) {
 
 function fmtWhatsApp(tel) {
   const digits = tel.replace(/\D/g, '');
-  const e164   = digits.startsWith('51') ? `51${digits}` : `51${digits}`; // Perú code fallback
+  // Si ya trae el código de país de Perú (51), no lo duplicar; si no, anteponerlo.
+  const e164   = digits.startsWith('51') ? digits : `51${digits}`;
   return `${e164}@c.us`; // Formato requerido por whatsapp-web.js
+}
+
+// Chromium/whatsapp-web.js pueden colgarse en sendMessage sin resolver la
+// promesa. Sin un timeout, el consumer (prefetch 5) quedaría bloqueado
+// indefinidamente en ese await, atascando toda la cola de notificaciones.
+const WA_SEND_TIMEOUT_MS = parseInt(process.env.WA_SEND_TIMEOUT_MS || '20000');
+function conTimeout(promesa, ms, etiqueta) {
+  return Promise.race([
+    promesa,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout de ${ms}ms en ${etiqueta}`)), ms)),
+  ]);
 }
 
 class WhatsAppNotLinkedError extends Error {
@@ -112,6 +125,9 @@ class WhatsappWebJSAdapter {
     });
 
     this.client.on('qr', async (qr) => {
+      // Chromium arrancó y llegó hasta WhatsApp Web → el perfil está sano;
+      // se resetea el contador de fallos de inicialización.
+      this._intentosInit = 0;
       this.isReady = false;
       this.qrGeneratedAt = Date.now();
       try {
@@ -124,6 +140,7 @@ class WhatsappWebJSAdapter {
     });
 
     this.client.on('ready', () => {
+      this._intentosInit = 0;
       this.isReady = true;
       this.currentQrDataUri = null;
       this.qrGeneratedAt = null;
@@ -160,9 +177,45 @@ class WhatsappWebJSAdapter {
       }
     });
 
-    this.client.initialize().catch(e => {
-      logger.error({ error: e.message }, '[WA-Adapter] Error al inicializar whatsapp-web.js');
+    this.client.initialize().catch(async (e) => {
+      this._intentosInit = (this._intentosInit || 0) + 1;
+      logger.error(
+        { error: e.message, intento: this._intentosInit },
+        '[WA-Adapter] Error al inicializar whatsapp-web.js'
+      );
+
+      // Cerrar el Chromium zombi del intento fallido antes de reintentar —
+      // si queda vivo, el siguiente intento choca contra su propio lock.
+      try { await this.client.destroy(); } catch { /* ya estaba muerto */ }
+
+      // Escalamiento de auto-recuperación:
+      //   Intento 1 falla → reintentar (limpiarLocksHuerfanos cubre locks
+      //     huérfanos de un contenedor anterior).
+      //   Intento 2 falla → el perfil está corrupto MÁS ALLÁ de los locks
+      //     (LevelDB/IndexedDB dañadas por un apagado no gracioso de
+      //     Docker/Windows). Sin esto, el retry giraba cada 5s contra la
+      //     misma carpeta rota para siempre y solo se salía borrándola a
+      //     mano. Perder la vinculación (re-escanear el QR) es preferible a
+      //     un servicio de notificaciones muerto hasta intervención manual.
+      if (this._intentosInit >= 2) {
+        this._borrarSesionCorrupta();
+      }
+
+      logger.warn(`[WA-Adapter] Reintentando inicialización en 5s (fallo #${this._intentosInit})...`);
+      setTimeout(() => this.initClient(), 5000);
     });
+  }
+
+  _borrarSesionCorrupta() {
+    try {
+      const authPath = path.resolve(WWEBJS_DATA_PATH);
+      if (fs.existsSync(authPath)) {
+        fs.rmSync(authPath, { recursive: true, force: true });
+        logger.warn('[WA-Adapter] ⚠️ Sesión corrupta eliminada automáticamente — se generará un QR NUEVO para re-vincular.');
+      }
+    } catch (err) {
+      logger.error({ error: err.message }, '[WA-Adapter] No se pudo borrar la sesión corrupta');
+    }
   }
 
   async unlink() {
@@ -199,13 +252,14 @@ class WhatsappWebJSAdapter {
     }
 
     const destino = fmtWhatsApp(telefono);
+    const destinoMask = maskTelefono(telefono);
 
     try {
-      const msg = await this.client.sendMessage(destino, mensaje);
-      logger.info({ sid: msg.id.id, destino, idMensaje }, '[WA-Adapter] Mensaje enviado por whatsapp-web.js');
+      const msg = await conTimeout(this.client.sendMessage(destino, mensaje), WA_SEND_TIMEOUT_MS, 'WhatsApp.sendMessage');
+      logger.info({ sid: msg.id.id, destino: destinoMask, idMensaje }, '[WA-Adapter] Mensaje enviado por whatsapp-web.js');
       return { exitoso: true, referencia: msg.id.id };
     } catch (e) {
-      logger.error({ error: e.message, destino }, '[WA-Adapter] Error al enviar mensaje');
+      logger.error({ error: e.message, destino: destinoMask }, '[WA-Adapter] Error al enviar mensaje');
       throw e; // Permitir que el consumer haga retry
     }
   }
