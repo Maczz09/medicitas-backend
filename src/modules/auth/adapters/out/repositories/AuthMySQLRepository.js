@@ -1,6 +1,6 @@
-const db = require('../../../config/database');
+const db = require('../../../../../config/database');
 
-class MySQLAuthRepository {
+class AuthMySQLRepository {
   async findUserByEmail(email) {
     const [rows] = await db.query(
       `SELECT u.*, r.nombre as rolNombre, s.failed_attempts, s.locked_until
@@ -123,7 +123,7 @@ class MySQLAuthRepository {
 
   async findUserByRefreshToken(token) {
     const [rows] = await db.query(
-      `SELECT u.*, r.nombre as rolNombre, s.refresh_expires_at 
+      `SELECT u.*, r.nombre as rolNombre, s.refresh_expires_at
        FROM medicitas_users.user_security s
        JOIN medicitas_users.usuarios u ON s.id_usuario = u.id_usuario
        JOIN medicitas_users.roles r ON u.id_rol = r.id_rol
@@ -150,8 +150,8 @@ class MySQLAuthRepository {
       );
       // Al cambiar clave, limpiar OTP y Refresh Tokens
       await conn.query(
-        `UPDATE medicitas_users.user_security 
-         SET otp_code = NULL, otp_expires_at = NULL, refresh_token = NULL, refresh_expires_at = NULL 
+        `UPDATE medicitas_users.user_security
+         SET otp_code = NULL, otp_expires_at = NULL, refresh_token = NULL, refresh_expires_at = NULL
          WHERE id_usuario = ?`,
         [userId]
       );
@@ -188,4 +188,4 @@ class MySQLAuthRepository {
   }
 }
 
-module.exports = MySQLAuthRepository;
+module.exports = AuthMySQLRepository;

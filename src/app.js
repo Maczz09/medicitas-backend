@@ -9,9 +9,9 @@ const { checkIdempotency } = require('./shared/infrastructure/api_idempotency.mi
 const { metricsMiddleware } = require('./shared/infrastructure/metrics.middleware');
 const { register } = require('./config/metrics');
 
-const authRouter = require('./modules/auth/infrastructure/http/v1/auth.routes');
-const pacientesRouter = require('./modules/pacientes/infrastructure/http/v1/pacientes.routes');
-const medicosRouter = require('./modules/medicos/infrastructure/http/v1/medicos.routes');
+const authRouter = require('./modules/auth/routes/auth.routes');
+const pacientesRouter = require('./modules/pacientes/routes/pacientes.routes');
+const medicosRouter = require('./modules/medicos/routes/medicos.routes');
 const citasRoutes = require('./modules/citas/infrastructure/http/v1/citas.routes');
 const segurosRoutes = require('./modules/seguros/routes/seguros.routes');
 const pagosRouter = require('./modules/pagos/routes/pagos.routes');

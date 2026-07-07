@@ -1,7 +1,7 @@
-const AuthUseCases = require('../../../application/auth.usecases');
-const MySQLAuthRepository = require('../../mysql.auth.repository');
+const AuthUseCases = require('../../application/auth.usecases');
+const AuthMySQLRepository = require('../out/repositories/AuthMySQLRepository');
 
-const repository = new MySQLAuthRepository();
+const repository = new AuthMySQLRepository();
 const authUseCases = new AuthUseCases(repository);
 
 exports.login = async (req, res, next) => {

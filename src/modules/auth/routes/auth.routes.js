@@ -1,7 +1,7 @@
 const router = require('express').Router();
-const controller = require('./auth.controller');
-const { verifyToken } = require('../../../../../shared/infrastructure/auth.middleware');
-const { requireRole } = require('../../../../../shared/infrastructure/rbac.middleware');
+const controller = require('../adapters/in/AuthController');
+const { verifyToken } = require('../../../shared/infrastructure/auth.middleware');
+const { requireRole } = require('../../../shared/infrastructure/rbac.middleware');
 
 /**
  * @swagger
