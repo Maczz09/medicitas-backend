@@ -21,7 +21,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /api/v1/webhooks/farmacia:
+ * /api/v2/webhooks/farmacia:
  *   post:
  *     summary: Recibe notificaciones asíncronas desde la farmacia (Webhooks)
  *     tags: [Webhooks]

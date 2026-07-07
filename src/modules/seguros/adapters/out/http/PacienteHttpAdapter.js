@@ -4,7 +4,7 @@ const logger = require('../../../../../shared/logger/logger');
 
 class PacienteHttpAdapter {
   constructor() {
-    this.baseURL = process.env.PACIENTES_API_URL || 'http://localhost/api/v1/pacientes';
+    this.baseURL = process.env.PACIENTES_API_URL || 'http://localhost/api/v2/pacientes';
     this.token = process.env.INTERNAL_SERVICE_TOKEN;
   }
 

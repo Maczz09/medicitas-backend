@@ -16,7 +16,7 @@ const router = Router();
 
 /**
  * @swagger
- * /api/v1/facturacion/pago/{idPago}/comprobante:
+ * /api/v2/facturacion/pago/{idPago}/comprobante:
  *   get:
  *     summary: Consultar comprobante asociado a un pago
  *     tags: [Facturacion]
@@ -38,7 +38,7 @@ router.get('/pago/:idPago/comprobante', verifyToken, requireRole(['RECEPCIONISTA
 
 /**
  * @swagger
- * /api/v1/facturacion/comprobantes/{id}:
+ * /api/v2/facturacion/comprobantes/{id}:
  *   get:
  *     summary: Consultar comprobante por su ID
  *     tags: [Facturacion]
@@ -60,7 +60,7 @@ router.get('/comprobantes/:id', verifyToken, requireRole(['RECEPCIONISTA','INTER
 
 /**
  * @swagger
- * /api/v1/facturacion/comprobantes/{id}/pdf:
+ * /api/v2/facturacion/comprobantes/{id}/pdf:
  *   get:
  *     summary: Descargar PDF del comprobante
  *     tags: [Facturacion]

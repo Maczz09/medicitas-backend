@@ -21,7 +21,7 @@ const { maskDocumento } = require('../../../../../shared/infrastructure/pii');
  * ValidarCoberturaUseCase no necesita cambios — sigue recibiendo siempre un objeto válido.
  *
  * Contrato del endpoint externo:
- *   GET /api/v1/asegurados/validar?tipoDocumento=DNI&numeroDocumento=12345678
+ *   GET /api/v2/asegurados/validar?tipoDocumento=DNI&numeroDocumento=12345678
  *   Header: X-Api-Key: <clave>
  */
 class AseguradoraAxiosAdapter {
@@ -30,7 +30,7 @@ class AseguradoraAxiosAdapter {
     // para que opossum mida tiempos consistentes. Ver circuitBreakerConfig.js.
     // Bulkhead: agente HTTP propio — aísla los sockets de seguros del pool global.
     this.client = axios.create({
-      baseURL: process.env.ASEGURADORA_API_URL || 'http://localhost:4001/api/v1',
+      baseURL: process.env.ASEGURADORA_API_URL || 'http://localhost:4001/api/v2',
       timeout: parseInt(process.env.HTTP_TIMEOUT_MS || '3000'),
       headers: { 'X-Api-Key': process.env.ASEGURADORA_API_KEY },
       httpAgent:  new http.Agent({ maxSockets: 20 }),

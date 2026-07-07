@@ -15,7 +15,7 @@ class PDFKitGenerator {
 
     const nombreArchivo = `${comprobante.numero}.pdf`;
     const rutaPdf       = path.join(STORAGE_PATH, nombreArchivo);
-    const urlDescarga   = `${APP_BASE_URL}/api/v1/facturacion/comprobantes/${comprobante.id}/pdf`;
+    const urlDescarga   = `${APP_BASE_URL}/api/v2/facturacion/comprobantes/${comprobante.id}/pdf`;
 
     try {
       await this._generarPDF(comprobante, rutaPdf);

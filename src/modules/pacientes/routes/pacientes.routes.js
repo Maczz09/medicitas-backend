@@ -7,7 +7,7 @@ const { crearPacienteSchema } = require('../../../shared/infrastructure/schemas'
 
 /**
  * @swagger
- * /api/v1/pacientes:
+ * /api/v2/pacientes:
  *   get:
  *     summary: Buscar y listar pacientes (paginado)
  *     tags: [Pacientes]
@@ -46,7 +46,7 @@ router.get('/', verifyToken, requireRole('Recepcionista', 'Auditor', 'Médico'),
 
 /**
  * @swagger
- * /api/v1/pacientes/{id}:
+ * /api/v2/pacientes/{id}:
  *   get:
  *     summary: Obtener perfil de paciente por ID
  *     tags: [Pacientes]
@@ -66,7 +66,7 @@ router.get('/:id', verifyToken, requireRole('Recepcionista', 'Auditor', 'Médico
 
 /**
  * @swagger
- * /api/v1/pacientes:
+ * /api/v2/pacientes:
  *   post:
  *     summary: Registrar un nuevo paciente
  *     tags: [Pacientes]
@@ -108,7 +108,7 @@ router.post('/', verifyToken, requireRole('Recepcionista', 'Auditor'), validate(
 
 /**
  * @swagger
- * /api/v1/pacientes/{id}/contacto:
+ * /api/v2/pacientes/{id}/contacto:
  *   put:
  *     summary: Actualizar datos de contacto del paciente
  *     tags: [Pacientes]
@@ -142,7 +142,7 @@ router.put('/:id/contacto', verifyToken, requireRole('Recepcionista', 'Auditor')
 
 /**
  * @swagger
- * /api/v1/pacientes/{id}/estado:
+ * /api/v2/pacientes/{id}/estado:
  *   patch:
  *     summary: Desactivar o activar a un paciente (Soft Delete)
  *     tags: [Pacientes]

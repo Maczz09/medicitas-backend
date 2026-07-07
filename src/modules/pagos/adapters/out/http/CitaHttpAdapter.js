@@ -10,7 +10,7 @@ class CitaHttpAdapter {
 
   async obtenerEstadoCita(idCita) {
     try {
-      const url = `${this.baseUrl}/api/v1/citas/${idCita}`;
+      const url = `${this.baseUrl}/api/v2/citas/${idCita}`;
       
       const response = await conReintentos(() => axios.get(url, {
         headers: {
@@ -42,7 +42,7 @@ class CitaHttpAdapter {
   async cancelarCita(idCita, motivo) {
     try {
       await conReintentos(() => axios.patch(
-        `${this.baseUrl}/api/v1/citas/${idCita}/cancelar`,
+        `${this.baseUrl}/api/v2/citas/${idCita}/cancelar`,
         { motivo },
         {
           headers: { Authorization: `Bearer ${this.internalToken}`, 'X-Internal-Service': 'true' },

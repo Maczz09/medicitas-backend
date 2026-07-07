@@ -76,7 +76,7 @@ router.get('/', verifyToken, requireRole('RECEPCIONISTA', 'Auditor'), async (req
 
 /**
  * @swagger
- * /api/v1/pagos:
+ * /api/v2/pagos:
  *   post:
  *     summary: Confirmar un pago físico (efectivo/POS)
  *     tags: [Pagos]
@@ -117,7 +117,7 @@ router.post('/',              verifyToken, requireRole('RECEPCIONISTA', 'Auditor
 
 /**
  * @swagger
- * /api/v1/pagos/{id}:
+ * /api/v2/pagos/{id}:
  *   get:
  *     summary: Consultar detalle de un pago por su ID
  *     tags: [Pagos]
@@ -140,7 +140,7 @@ router.get('/:id',            verifyToken, requireRole(['RECEPCIONISTA','INTERNA
 
 /**
  * @swagger
- * /api/v1/pagos/cita/{idCita}:
+ * /api/v2/pagos/cita/{idCita}:
  *   get:
  *     summary: Consultar el pago asociado a una cita
  *     tags: [Pagos]
@@ -163,7 +163,7 @@ router.get('/cita/:idCita',   verifyToken, requireRole(['RECEPCIONISTA','INTERNA
 
 /**
  * @swagger
- * /api/v1/pagos/{id}/reversar:
+ * /api/v2/pagos/{id}/reversar:
  *   post:
  *     summary: Reversar un pago confirmado
  *     tags: [Pagos]

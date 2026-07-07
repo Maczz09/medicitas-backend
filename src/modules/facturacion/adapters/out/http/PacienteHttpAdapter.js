@@ -10,7 +10,7 @@ class PacienteHttpAdapter {
 
   async obtenerNombre(idPaciente) {
     try {
-      const resp = await conReintentos(() => axios.get(`${this.baseUrl}/api/v1/pacientes/${idPaciente}`, {
+      const resp = await conReintentos(() => axios.get(`${this.baseUrl}/api/v2/pacientes/${idPaciente}`, {
         headers: { Authorization: `Bearer ${this.internalToken}` },
         timeout: 2000,
       }), {}, logger);

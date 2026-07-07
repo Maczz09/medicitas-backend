@@ -151,7 +151,7 @@ router.get('/', verifyToken, requireRole('Médico', 'Recepcionista', 'Auditor'),
 
 /**
  * @swagger
- * /api/v1/recetas/{id}:
+ * /api/v2/recetas/{id}:
  *   get:
  *     summary: Consultar el estado de una receta enviada a la farmacia
  *     tags: [Prescripciones]
@@ -178,7 +178,7 @@ router.get('/:id',
 
 /**
  * @swagger
- * /api/v1/recetas/{id}/reintentar:
+ * /api/v2/recetas/{id}/reintentar:
  *   post:
  *     summary: Reintentar el envío de una receta rechazada
  *     tags: [Prescripciones]
@@ -205,7 +205,7 @@ router.post('/:id/reintentar',
 
 /**
  * @swagger
- * /api/v1/recetas/{id}/retirada:
+ * /api/v2/recetas/{id}/retirada:
  *   patch:
  *     summary: Registrar que el paciente retiró el medicamento
  *     tags: [Prescripciones]

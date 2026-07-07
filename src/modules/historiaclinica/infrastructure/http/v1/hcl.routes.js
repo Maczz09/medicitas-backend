@@ -5,7 +5,7 @@ const { requireRole } = require('../../../../../shared/infrastructure/rbac.middl
 
 /**
  * @swagger
- * /api/v1/historia-clinica/expedientes:
+ * /api/v2/historia-clinica/expedientes:
  *   post:
  *     summary: Crear un expediente clínico para un paciente
  *     tags: [Historia Clínica]
@@ -32,7 +32,7 @@ router.post('/expedientes', verifyToken, requireRole('Recepcionista', 'Médico')
 
 /**
  * @swagger
- * /api/v1/historia-clinica/pacientes/{idPaciente}/encuentros:
+ * /api/v2/historia-clinica/pacientes/{idPaciente}/encuentros:
  *   post:
  *     summary: Registrar un nuevo encuentro clínico (atención médica)
  *     tags: [Historia Clínica]

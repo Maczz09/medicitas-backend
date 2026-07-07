@@ -19,7 +19,7 @@ class PagoHttpAdapter {
   async obtenerPagoDeCita(idCita) {
     try {
       const { data } = await conReintentos(() => axios.get(
-        `${this.baseUrl}/api/v1/pagos/cita/${idCita}`,
+        `${this.baseUrl}/api/v2/pagos/cita/${idCita}`,
         { headers: { Authorization: `Bearer ${this.internalToken}` }, timeout: 4000 }
       ), {}, logger);
       const pago = data?.data ?? data;

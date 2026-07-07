@@ -5,7 +5,7 @@ const { requireRole } = require('../../../shared/infrastructure/rbac.middleware'
 
 /**
  * @swagger
- * /api/v1/auth/login:
+ * /api/v2/auth/login:
  *   post:
  *     summary: Iniciar sesión y obtener tokens
  *     tags: [Auth]
@@ -30,7 +30,7 @@ router.post('/login', controller.login);
 
 /**
  * @swagger
- * /api/v1/auth/refresh:
+ * /api/v2/auth/refresh:
  *   post:
  *     summary: Obtener nuevo access token usando refresh token
  *     tags: [Auth]
@@ -53,7 +53,7 @@ router.post('/refresh', controller.refreshToken);
 
 /**
  * @swagger
- * /api/v1/auth/forgot-password:
+ * /api/v2/auth/forgot-password:
  *   post:
  *     summary: Solicitar OTP para recuperación de contraseña
  *     tags: [Auth]
@@ -76,7 +76,7 @@ router.post('/forgot-password', controller.generateOTP);
 
 /**
  * @swagger
- * /api/v1/auth/reset-password:
+ * /api/v2/auth/reset-password:
  *   post:
  *     summary: Restablecer contraseña con OTP
  *     tags: [Auth]
@@ -103,7 +103,7 @@ router.post('/reset-password', controller.resetPassword);
 
 /**
  * @swagger
- * /api/v1/auth/register:
+ * /api/v2/auth/register:
  *   post:
  *     summary: Registro de usuarios internos (Solo Auditor/Recepcionista)
  *     tags: [Auth]
@@ -137,7 +137,7 @@ router.post('/register', verifyToken, requireRole('Auditor', 'Recepcionista'), c
 
 /**
  * @swagger
- * /api/v1/auth/usuarios:
+ * /api/v2/auth/usuarios:
  *   get:
  *     summary: Listar usuarios del sistema (paginado + búsqueda) — Solo Auditor
  *     tags: [Auth]
@@ -148,7 +148,7 @@ router.get('/usuarios', verifyToken, requireRole('Auditor', 'Médico', 'Recepcio
 
 /**
  * @swagger
- * /api/v1/auth/usuarios/{id}:
+ * /api/v2/auth/usuarios/{id}:
  *   put:
  *     summary: Editar un usuario (nombre, apellido, email, rol, activo) — Auditor/Recepcionista
  *     tags: [Auth]
@@ -159,7 +159,7 @@ router.put('/usuarios/:id', verifyToken, requireRole('Auditor'), controller.upda
 
 /**
  * @swagger
- * /api/v1/auth/usuarios/{id}/rol:
+ * /api/v2/auth/usuarios/{id}/rol:
  *   put:
  *     summary: Asignar un nuevo rol a un usuario (Solo Auditor)
  *     tags: [Auth]

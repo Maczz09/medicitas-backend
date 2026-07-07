@@ -32,7 +32,7 @@ class AuditoriaController {
 
       // 2. Aseguradora
       try {
-        const url = process.env.ASEGURADORA_API_URL?.replace('/api/v1', '/health') || 'http://localhost:4001/health';
+        const url = process.env.ASEGURADORA_API_URL?.replace('/api/v2', '/health') || 'http://localhost:4001/health';
         await axios.get(url, { timeout: 2000 });
         response.aseguradora.status = 'UP';
       } catch (e) {
@@ -41,8 +41,8 @@ class AuditoriaController {
 
       // 3. Farmacia
       try {
-        // FARMACIA_API_URL suele ser .../api/v1/farmacia/recepcionar-receta
-        const url = process.env.FARMACIA_API_URL?.split('/api/v1')[0] + '/health' || 'http://farmacia_api:4002/health';
+        // FARMACIA_API_URL suele ser .../api/v2/farmacia/recepcionar-receta
+        const url = process.env.FARMACIA_API_URL?.split('/api/v2')[0] + '/health' || 'http://farmacia_api:4002/health';
         await axios.get(url, { timeout: 2000 });
         response.farmacia.status = 'UP';
       } catch (e) {

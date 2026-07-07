@@ -11,7 +11,7 @@ class PacienteHttpAdapter {
   async existePaciente(idPaciente) {
     try {
       await conReintentos(() => axios.get(
-        `${this.baseUrl}/api/v1/pacientes/${idPaciente}`,
+        `${this.baseUrl}/api/v2/pacientes/${idPaciente}`,
         {
           headers: { Authorization: `Bearer ${this.internalToken}` },
           timeout: 3000,

@@ -19,7 +19,7 @@ const router = Router();
 
 /**
  * @swagger
- * /api/v1/auditoria/health:
+ * /api/v2/auditoria/health:
  *   get:
  *     summary: Obtener el estado de salud de todos los sistemas
  *     tags: [Auditoria]
@@ -34,7 +34,7 @@ router.post('/whatsapp/unlink', verifyToken, requireRole(['AUDITOR','INTERNAL'])
 
 /**
  * @swagger
- * /api/v1/auditoria/trazas:
+ * /api/v2/auditoria/trazas:
  *   get:
  *     summary: Consultar trazas con filtros
  *     tags: [Auditoria]
@@ -57,7 +57,7 @@ router.get('/trazas', verifyToken, requireRole(['AUDITOR','INTERNAL']), controll
 
 /**
  * @swagger
- * /api/v1/auditoria/correlacion/{correlationId}:
+ * /api/v2/auditoria/correlacion/{correlationId}:
  *   get:
  *     summary: Reconstruir flujo completo por correlationId
  *     tags: [Auditoria]

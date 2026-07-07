@@ -10,7 +10,7 @@ class CoberturaHttpAdapter {
 
   async obtenerCobertura(idValidacion) {
     try {
-      const url = `${this.baseUrl}/api/v1/coberturas/${idValidacion}`;
+      const url = `${this.baseUrl}/api/v2/coberturas/${idValidacion}`;
       
       const response = await conReintentos(() => axios.get(url, {
         headers: {

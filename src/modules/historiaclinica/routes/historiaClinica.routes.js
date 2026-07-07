@@ -38,7 +38,7 @@ router.use(verifyToken);
 
 /**
  * @swagger
- * /api/v1/historias-clinicas/expedientes:
+ * /api/v2/historias-clinicas/expedientes:
  *   post:
  *     summary: Crear (o recuperar) el expediente clínico de un paciente
  *     tags: [Historia Clínica]
@@ -76,7 +76,7 @@ router.post('/expedientes', requireRole('Médico', 'Recepcionista', 'Auditor'), 
 
 /**
  * @swagger
- * /api/v1/historias-clinicas/{idPaciente}/resumen:
+ * /api/v2/historias-clinicas/{idPaciente}/resumen:
  *   get:
  *     summary: Obtener resumen clínico del expediente
  *     tags: [Historia Clínica]
@@ -96,7 +96,7 @@ router.get( '/:idPaciente/resumen', requireRole('Médico', 'Auditor'), controlle
 
 /**
  * @swagger
- * /api/v1/historias-clinicas/{idPaciente}/encuentros:
+ * /api/v2/historias-clinicas/{idPaciente}/encuentros:
  *   get:
  *     summary: Obtener el histórico profundo de encuentros clínicos (paginado)
  *     tags: [Historia Clínica]
@@ -126,7 +126,7 @@ router.get( '/:idPaciente/encuentros', requireRole('Médico', 'Auditor'), contro
 
 /**
  * @swagger
- * /api/v1/historias-clinicas/{idPaciente}/encuentros:
+ * /api/v2/historias-clinicas/{idPaciente}/encuentros:
  *   post:
  *     summary: Registrar un nuevo encuentro clínico y prescripciones
  *     tags: [Historia Clínica]

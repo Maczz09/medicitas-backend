@@ -6,7 +6,7 @@ const { soloMedicoPropietario } = require('../../../shared/infrastructure/resour
 
 /**
  * @swagger
- * /api/v1/medicos:
+ * /api/v2/medicos:
  *   post:
  *     summary: Crear un nuevo médico
  *     tags: [Médicos]
@@ -38,7 +38,7 @@ router.post('/', verifyToken, requireRole('Auditor'), controller.createMedico);
 
 /**
  * @swagger
- * /api/v1/medicos/{id}/disponibilidad:
+ * /api/v2/medicos/{id}/disponibilidad:
  *   get:
  *     summary: Verificar disponibilidad del médico
  *     tags: [Médicos]

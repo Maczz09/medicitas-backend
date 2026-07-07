@@ -29,7 +29,7 @@ const app = express();
 app.set('trust proxy', 1);
 
 // Las llamadas S2S internas (PacienteHttpAdapter, CitaHttpAdapter, etc.) se
-// enrutan por HTTP hacia el propio proceso (localhost:3000/api/v1/...) y
+// enrutan por HTTP hacia el propio proceso (localhost:3000/api/v2/...) y
 // pasan por este mismo router — sin este skip, comparten presupuesto con el
 // tráfico público y un pico de eventos en cola (consumers RabbitMQ) puede
 // agotar el límite y devolver 429 en cascada a operaciones internas legítimas.
@@ -89,22 +89,22 @@ app.get('/metrics', async (req, res) => {
 
 app.use('/api/', apiLimiter);
 
-app.use('/api/v1/auth', authLimiter, authRouter);
-app.use('/api/v1/pacientes', pacientesRouter);
-app.use('/api/v1/medicos', medicosRouter);
-app.use('/api/v1/citas', citasRoutes);
-app.use('/api/v1/coberturas', segurosRoutes);
-app.use('/api/v1/pagos', pagosRouter);
-app.use('/api/v1/historias-clinicas', hclRouter);
-app.use('/api/v1/prescripciones', preRouter);
-app.use('/api/v1/facturacion', facRouter);
-app.use('/api/v1/auditoria', audRouter);
-app.use('/api/v1/notificaciones', notRouter);
-app.use('/api/v1/realtime', realtimeRouter);
+app.use('/api/v2/auth', authLimiter, authRouter);
+app.use('/api/v2/pacientes', pacientesRouter);
+app.use('/api/v2/medicos', medicosRouter);
+app.use('/api/v2/citas', citasRoutes);
+app.use('/api/v2/coberturas', segurosRoutes);
+app.use('/api/v2/pagos', pagosRouter);
+app.use('/api/v2/historias-clinicas', hclRouter);
+app.use('/api/v2/prescripciones', preRouter);
+app.use('/api/v2/facturacion', facRouter);
+app.use('/api/v2/auditoria', audRouter);
+app.use('/api/v2/notificaciones', notRouter);
+app.use('/api/v2/realtime', realtimeRouter);
 
 // Webhooks entrantes de servicios externos (farmacia-api, aseguradora-api) — protegidos por API Key compartida
-app.use('/api/v1/webhooks/farmacia', webhookRouter);
-app.use('/api/v1/webhooks/seguros', segurosWebhookRouter);
+app.use('/api/v2/webhooks/farmacia', webhookRouter);
+app.use('/api/v2/webhooks/seguros', segurosWebhookRouter);
 
 // Webhooks externos (sin rate-limit ni auth — validados por firma Twilio)
 app.use('/webhooks/twilio', twilioWebhook);

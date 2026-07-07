@@ -139,7 +139,7 @@ router.get('/', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'),
 
 /**
  * @swagger
- * /api/v1/citas:
+ * /api/v2/citas:
  *   post:
  *     summary: Reserva una nueva cita
  *     tags: [Citas]
@@ -189,7 +189,7 @@ router.post('/',
 
 /**
  * @swagger
- * /api/v1/citas/{id}:
+ * /api/v2/citas/{id}:
  *   get:
  *     summary: Obtiene los detalles de una cita
  *     tags: [Citas]
@@ -218,7 +218,7 @@ router.get('/:id',
 
 /**
  * @swagger
- * /api/v1/citas/{id}/cancelar:
+ * /api/v2/citas/{id}/cancelar:
  *   patch:
  *     summary: Cancela una cita existente
  *     tags: [Citas]
@@ -257,7 +257,7 @@ router.patch('/:id/cancelar',
 
 /**
  * @swagger
- * /api/v1/citas/{id}/reprogramar:
+ * /api/v2/citas/{id}/reprogramar:
  *   patch:
  *     summary: Reprograma una cita a un nuevo horario y/o médico
  *     tags: [Citas]
@@ -302,7 +302,7 @@ router.patch('/:id/reprogramar',
 
 /**
  * @swagger
- * /api/v1/citas/{id}/ingreso:
+ * /api/v2/citas/{id}/ingreso:
  *   post:
  *     summary: Registra el ingreso del paciente a la cita (En Atención)
  *     tags: [Citas]
@@ -340,7 +340,7 @@ router.patch('/:id/revertir-ingreso',
 // INTERNAL: Llamado por SVC-HCL-002
 /**
  * @swagger
- * /api/v1/citas/{id}/completar:
+ * /api/v2/citas/{id}/completar:
  *   patch:
  *     summary: Completa una cita médica (Llamada interna por SVC-HCL)
  *     tags: [Citas]

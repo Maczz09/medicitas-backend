@@ -11,7 +11,7 @@ class CitaHttpAdapter {
 
   async completarCita(idCita) {
     const { data } = await conReintentos(() => axios.patch(
-      `${this.baseUrl}/api/v1/citas/${idCita}/completar`,
+      `${this.baseUrl}/api/v2/citas/${idCita}/completar`,
       {},
       {
         headers: { Authorization: `Bearer ${this.internalToken}` },
@@ -24,7 +24,7 @@ class CitaHttpAdapter {
   async obtenerEstadoCita(idCita) {
     try {
       const { data } = await conReintentos(() => axios.get(
-        `${this.baseUrl}/api/v1/citas/${idCita}`,
+        `${this.baseUrl}/api/v2/citas/${idCita}`,
         {
           headers: { Authorization: `Bearer ${this.internalToken}` },
           timeout: 3000,

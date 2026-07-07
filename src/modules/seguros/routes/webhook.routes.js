@@ -23,7 +23,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /api/v1/webhooks/seguros:
+ * /api/v2/webhooks/seguros:
  *   post:
  *     summary: Webhook de Aseguradora (Actualización de póliza)
  *     description: Recibe el cambio de estado de una póliza desde la aseguradora para sincronizar internamente la base de datos de coberturas. Requiere X-Api-Key.

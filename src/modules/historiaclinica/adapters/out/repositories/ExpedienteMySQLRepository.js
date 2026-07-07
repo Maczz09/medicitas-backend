@@ -61,7 +61,7 @@ class ExpedienteMySQLRepository {
           idEncuentro:    row.idUltimoEncuentro,
           fecha:          row.fechaUltimaAtencion,
           diagnosticoCie10: row.diagnosticoCie10,
-          enlaceDetalle:  `/api/v1/historias-clinicas/encuentros/${row.idUltimoEncuentro}`,
+          enlaceDetalle:  `/api/v2/historias-clinicas/encuentros/${row.idUltimoEncuentro}`,
         } : null,
       };
     } catch (err) {

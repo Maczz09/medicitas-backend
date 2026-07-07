@@ -7,7 +7,7 @@ const { conReintentos } = require('../../../../../shared/resilience/retryConBack
 class PacienteHttpAdapter extends IPacienteValidatorPort {
   constructor() {
     super();
-    this.baseUrl = process.env.API_BASE_URL || 'http://localhost:3000/api/v1';
+    this.baseUrl = process.env.API_BASE_URL || 'http://localhost:3000/api/v2';
   }
 
   _generarInternalToken() {

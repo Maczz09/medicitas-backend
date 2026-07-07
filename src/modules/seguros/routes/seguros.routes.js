@@ -133,7 +133,7 @@ router.get('/', verifyToken, requireRole('Recepcionista', 'Auditor'), async (req
 
 /**
  * @swagger
- * /api/v1/coberturas/validar:
+ * /api/v2/coberturas/validar:
  *   post:
  *     summary: Validar la cobertura de un paciente con la aseguradora
  *     tags: [Seguros]
@@ -179,7 +179,7 @@ router.post('/validar',
 
 /**
  * @swagger
- * /api/v1/coberturas/{id}:
+ * /api/v2/coberturas/{id}:
  *   get:
  *     summary: Consultar el resultado de una validación de cobertura existente
  *     tags: [Seguros]

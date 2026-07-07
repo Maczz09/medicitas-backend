@@ -15,7 +15,7 @@ const { z } = require('zod');
 
 const noVacio = (campo) => z.string({ error: `${campo} es obligatorio` }).trim().min(1, `${campo} no puede estar vacío`);
 
-// ── Citas: POST /api/v1/citas ──────────────────────────────────────────────
+// ── Citas: POST /api/v2/citas ──────────────────────────────────────────────
 const crearCitaSchema = z.object({
   idPaciente: noVacio('idPaciente'),
   idMedico: noVacio('idMedico'),
@@ -25,7 +25,7 @@ const crearCitaSchema = z.object({
     .datetime({ offset: true, message: 'fechaHora debe ser una fecha-hora ISO 8601 válida (ej. 2026-07-10T15:00:00Z)' }),
 });
 
-// ── Pagos: POST /api/v1/pagos ──────────────────────────────────────────────
+// ── Pagos: POST /api/v2/pagos ──────────────────────────────────────────────
 const METODOS_PAGO = ['EFECTIVO', 'TARJETA', 'YAPE', 'PLIN', 'TRANSFERENCIA'];
 const TIPOS_COMPROBANTE = ['BOLETA', 'FACTURA'];
 
@@ -45,7 +45,7 @@ const confirmarPagoSchema = z.object({
   path: ['montoCopago'],
 });
 
-// ── Pacientes: POST /api/v1/pacientes ──────────────────────────────────────
+// ── Pacientes: POST /api/v2/pacientes ──────────────────────────────────────
 const TIPOS_DOC = ['DNI', 'CE', 'PASAPORTE'];
 const SEXOS = ['M', 'F', 'Otro'];
 
@@ -75,7 +75,7 @@ const crearPacienteSchema = z.object({
   }
 });
 
-// ── Historia Clínica: POST /api/v1/historias-clinicas/:idPaciente/encuentros ─
+// ── Historia Clínica: POST /api/v2/historias-clinicas/:idPaciente/encuentros ─
 const registrarEncuentroSchema = z.object({
   idCita: noVacio('idCita'),
   diagnosticoCie10: noVacio('diagnosticoCie10').regex(/^[A-Z]\d{1,3}(\.\d{1,2})?$/i, 'diagnosticoCie10 debe ser un código CIE-10 válido (ej. J10, I10.9)'),
@@ -91,7 +91,7 @@ const registrarEncuentroSchema = z.object({
   })).optional(),
 }).passthrough();
 
-// ── Coberturas: POST /api/v1/coberturas/validar ────────────────────────────
+// ── Coberturas: POST /api/v2/coberturas/validar ────────────────────────────
 const validarCoberturaSchema = z.object({
   idPaciente: noVacio('idPaciente'),
   idAseguradora: noVacio('idAseguradora'),

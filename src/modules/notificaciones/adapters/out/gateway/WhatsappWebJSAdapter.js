@@ -8,7 +8,7 @@ const path = require('path');
 const { maskTelefono } = require('../../../../../shared/infrastructure/pii');
 
 const STATUS_CALLBACK = process.env.APP_PUBLIC_URL
-  ? `${process.env.APP_PUBLIC_URL}/api/v1/webhooks/twilio/status`
+  ? `${process.env.APP_PUBLIC_URL}/api/v2/webhooks/twilio/status`
   : null;
 
 const WWEBJS_DATA_PATH = './src/.wwebjs_auth';
