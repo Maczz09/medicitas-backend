@@ -1,4 +1,13 @@
-class GenerarRecetaContingenciaUseCase {
+// Genera el PDF de una receta y notifica al paciente por WhatsApp con el link
+// de descarga — en DOS escenarios distintos, distinguidos por esContingencia:
+//   true  (farmacia caída): el PDF es el único registro de la receta que el
+//         paciente puede presentar mientras el despacho real se reintenta en
+//         background (ver IniciarDespachoUseCase, rama TRANSPORTE).
+//   false (despacho exitoso): copia de cortesía, además de que la farmacia
+//         ya recibió y procesó la receta normalmente.
+// Mismo caso de uso para ambos — solo cambia el contenido del PDF (el aviso
+// de contingencia) y la plantilla de WhatsApp (evento distinto).
+class GenerarRecetaPDFUseCase {
   constructor({ recetasContingenciaRepository, pdfGenerator, eventPublisher, getConnection, logger }) {
     this.recetasRepo    = recetasContingenciaRepository;
     this.pdfGenerator   = pdfGenerator;
@@ -7,9 +16,10 @@ class GenerarRecetaContingenciaUseCase {
     this.logger         = logger;
   }
 
-  async ejecutar(despacho, contenido, correlationId) {
-    // Idempotencia: si el circuit breaker sigue abierto en un reintento
-    // posterior del mismo despacho, no se genera un segundo PDF/WhatsApp.
+  async ejecutar(despacho, contenido, correlationId, { esContingencia = true, referenciaFarmacia = null } = {}) {
+    // Idempotencia: un despacho solo genera un PDF una vez (UNIQUE KEY
+    // uq_despacho), sin importar cuántas veces se reintente o se dispare
+    // el camino de éxito y el de contingencia para el mismo despacho.
     const connCheck = await this.getConnection();
     let existente;
     try {
@@ -18,7 +28,7 @@ class GenerarRecetaContingenciaUseCase {
       connCheck.release();
     }
     if (existente) {
-      this.logger.info({ idDespacho: despacho.id }, '[Contingencia] Ya existe receta de contingencia para este despacho — omitido.');
+      this.logger.info({ idDespacho: despacho.id }, '[RecetaPDF] Ya existe receta en PDF para este despacho — omitido.');
       return existente;
     }
 
@@ -33,7 +43,7 @@ class GenerarRecetaContingenciaUseCase {
       }
     } catch (err) {
       this.logger.warn({ err: err.message, idPaciente: despacho.idPaciente },
-        '[Contingencia] No se pudo obtener el nombre del paciente — el PDF se genera solo con el ID.');
+        '[RecetaPDF] No se pudo obtener el nombre del paciente — el PDF se genera solo con el ID.');
     }
 
     const id = `RCT-${Date.now().toString(36).toUpperCase()}`;
@@ -44,12 +54,15 @@ class GenerarRecetaContingenciaUseCase {
       medicamento:   contenido?.medicamento,
       dosis:         contenido?.dosis,
       cantidad:      contenido?.cantidad,
+      esContingencia,
+      referenciaFarmacia,
     });
 
     const receta = {
       id,
       idDespacho:   despacho.id,
       idPaciente:   despacho.idPaciente,
+      esContingencia,
       medicamento:  contenido?.medicamento,
       dosis:        contenido?.dosis,
       cantidad:     contenido?.cantidad,
@@ -65,8 +78,8 @@ class GenerarRecetaContingenciaUseCase {
 
       // Dispara el envío por WhatsApp reusando el pipeline existente de
       // notificaciones (plantilla + resolución de teléfono + retry/DLQ) —
-      // ver SMSTemplates.js: RecetaContingenciaGenerada.
-      await this.eventPublisher.publish(conn, 'RecetaContingenciaGenerada', {
+      // ver SMSTemplates.js: RecetaContingenciaGenerada / RecetaPDFDisponible.
+      await this.eventPublisher.publish(conn, esContingencia ? 'RecetaContingenciaGenerada' : 'RecetaPDFDisponible', {
         idPaciente:  despacho.idPaciente,
         idDespacho:  despacho.id,
         medicamento: contenido?.medicamento,
@@ -81,11 +94,11 @@ class GenerarRecetaContingenciaUseCase {
       conn.release();
     }
 
-    this.logger.warn({ idDespacho: despacho.id, idRecetaContingencia: id },
-      '[Contingencia] Receta de contingencia generada (PDF + WhatsApp encolado).');
+    this.logger.info({ idDespacho: despacho.id, idRecetaPDF: id, esContingencia },
+      '[RecetaPDF] Receta en PDF generada (WhatsApp encolado).');
 
     return receta;
   }
 }
 
-module.exports = GenerarRecetaContingenciaUseCase;
+module.exports = GenerarRecetaPDFUseCase;

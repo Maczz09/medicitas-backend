@@ -2,13 +2,13 @@ const Despacho = require('../../domain/entities/Despacho');
 const { FARMACIA_DEFAULT_ID } = require('../../../../shared/config/farmacia.config');
 
 class IniciarDespachoUseCase {
-  constructor({ despachosRepository, farmaciaGateway, eventPublisher, getConnection, logger, generarContingenciaUseCase }) {
+  constructor({ despachosRepository, farmaciaGateway, eventPublisher, getConnection, logger, generarRecetaPDFUseCase }) {
     this.despachosRepo = despachosRepository;
     this.farmaciaGateway = farmaciaGateway;
     this.eventPublisher = eventPublisher;
     this.getConnection = getConnection;
     this.logger = logger;
-    this.generarContingenciaUseCase = generarContingenciaUseCase || null;
+    this.generarRecetaPDFUseCase = generarRecetaPDFUseCase || null;
   }
 
   async ejecutar(payloadPrescripcionEmitida, correlationId, idEvento) {
@@ -103,9 +103,9 @@ class IniciarDespachoUseCase {
         // sostenida, no un timeout aislado) — evita generar un PDF/WhatsApp por
         // cada blip transitorio que el reintento normal ya resuelve solo.
         // Best-effort: un fallo aquí jamás debe impedir el reencolado normal.
-        if (this.farmaciaGateway.breaker?.opened && this.generarContingenciaUseCase) {
+        if (this.farmaciaGateway.breaker?.opened && this.generarRecetaPDFUseCase) {
           try {
-            await this.generarContingenciaUseCase.ejecutar(despacho, contenido, correlationId);
+            await this.generarRecetaPDFUseCase.ejecutar(despacho, contenido, correlationId, { esContingencia: true });
           } catch (contErr) {
             this.logger.warn({ err: contErr.message, idDespacho: despacho.id },
               '[Contingencia] Fallo generando PDF/WhatsApp de contingencia — no bloquea el reintento normal del despacho.');
@@ -121,6 +121,22 @@ class IniciarDespachoUseCase {
       throw err;
     } finally {
       conn.release();
+    }
+
+    // Fuera de la transacción del despacho: tras un despacho EXITOSO, también
+    // se genera un PDF de cortesía + WhatsApp para el paciente (no solo en
+    // contingencia) — best-effort, nunca revierte el estado DESPACHADA ya
+    // confirmado ni bloquea el flujo si falla.
+    if (resultado.aceptada && this.generarRecetaPDFUseCase) {
+      try {
+        await this.generarRecetaPDFUseCase.ejecutar(despacho, contenido, correlationId, {
+          esContingencia: false,
+          referenciaFarmacia: resultado.referenciaFarmacia,
+        });
+      } catch (err) {
+        this.logger.warn({ err: err.message, idDespacho: despacho.id },
+          '[RecetaPDF] Fallo generando PDF de cortesía tras despacho exitoso — no afecta el estado DESPACHADA ya confirmado.');
+      }
     }
   }
 }

@@ -24,7 +24,7 @@ class RecetaPDFGenerator {
         fs.unlinkSync(rutaPdf);
       }
       throw new DomainError('ERROR_GENERACION_PDF', 500,
-        `No se pudo generar el PDF de la receta de contingencia: ${err.message}`);
+        `No se pudo generar el PDF de la receta: ${err.message}`);
     }
   }
 
@@ -44,14 +44,16 @@ class RecetaPDFGenerator {
       doc.moveTo(40, doc.y).lineTo(doc.page.width - 40, doc.y).stroke();
       doc.moveDown(0.5);
 
-      // ── Aviso de contingencia ────────────────────────────────────────────────
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#B45309')
-         .text('⚠ RECETA DE CONTINGENCIA', { align: 'center' });
-      doc.fontSize(8).font('Helvetica').fillColor('#B45309')
-         .text('Generada porque el sistema de farmacia no estaba disponible al momento de la emisión. ' +
-               'Preséntela en cualquier farmacia junto con su documento de identidad.', { align: 'center' });
-      doc.fillColor('black');
-      doc.moveDown(0.8);
+      // ── Aviso de contingencia (solo si la farmacia estaba caída) ──────────────
+      if (receta.esContingencia) {
+        doc.fontSize(9).font('Helvetica-Bold').fillColor('#B45309')
+           .text('⚠ RECETA DE CONTINGENCIA', { align: 'center' });
+        doc.fontSize(8).font('Helvetica').fillColor('#B45309')
+           .text('Generada porque el sistema de farmacia no estaba disponible al momento de la emisión. ' +
+                 'Preséntela en cualquier farmacia junto con su documento de identidad.', { align: 'center' });
+        doc.fillColor('black');
+        doc.moveDown(0.8);
+      }
 
       // ── Título ────────────────────────────────────────────────────────────────
       doc.fontSize(14).font('Helvetica-Bold')
@@ -79,6 +81,7 @@ class RecetaPDFGenerator {
       doc.text(`Medicamento: ${receta.medicamento || 'No especificado'}`);
       if (receta.dosis)    doc.text(`Dosis: ${receta.dosis}`);
       if (receta.cantidad) doc.text(`Cantidad: ${receta.cantidad}`);
+      if (receta.referenciaFarmacia) doc.text(`Referencia de farmacia: ${receta.referenciaFarmacia}`);
       doc.moveDown(1.2);
 
       // ── Pie de página ─────────────────────────────────────────────────────────

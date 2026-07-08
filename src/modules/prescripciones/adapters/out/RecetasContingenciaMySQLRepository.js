@@ -19,12 +19,13 @@ class RecetasContingenciaMySQLRepository {
     const query = `
       INSERT INTO svc_pre.recetas_contingencia (
         id, id_despacho, id_paciente, medicamento, dosis, cantidad,
-        ruta_pdf, url_descarga, correlation_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        es_contingencia, ruta_pdf, url_descarga, correlation_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const params = [
       receta.id, receta.idDespacho, receta.idPaciente,
       receta.medicamento || null, receta.dosis || null, receta.cantidad || null,
+      receta.esContingencia ? 1 : 0,
       receta.rutaPdf, receta.urlDescarga, receta.correlationId || null,
     ];
     await conn.query(query, params);
@@ -35,7 +36,7 @@ class RecetasContingenciaMySQLRepository {
     const [countRows] = await db.query('SELECT COUNT(*) AS total FROM svc_pre.recetas_contingencia');
     const [rows] = await db.query(
       `SELECT rc.id, rc.id_despacho, rc.id_paciente, rc.medicamento, rc.dosis, rc.cantidad,
-              rc.url_descarga, rc.correlation_id, rc.created_at,
+              rc.es_contingencia, rc.url_descarga, rc.correlation_id, rc.created_at,
               CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
               d.estado AS estado_despacho
        FROM svc_pre.recetas_contingencia rc
@@ -48,6 +49,33 @@ class RecetasContingenciaMySQLRepository {
       data: rows,
       total: countRows[0].total,
     };
+  }
+
+  /** Detalle completo para la vista de auditoría/médico: médico (con CMP), cita y farmacia. */
+  async findDetalleByIdDespacho(idDespacho, db) {
+    const [rows] = await db.query(
+      `SELECT d.id, d.estado, d.contenido, d.fecha_emision, d.fecha_despacho, d.fecha_retiro,
+              d.referencia_farmacia, d.observacion_farmacia, d.motivo_rechazo, d.intentos_envio,
+              d.correlation_id AS despacho_correlation_id, d.id_farmacia, d.id_paciente, d.id_encuentro_clinico,
+              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
+              p.tipo_documento AS paciente_tipo_documento, p.numero_documento AS paciente_numero_documento,
+              p.telefono AS paciente_telefono,
+              ec.id_cita, ec.fecha_hora AS encuentro_fecha_hora,
+              ec.diagnostico_cie10, ec.diagnostico_descripcion,
+              m.id_medico, CONCAT(m.nombre, ' ', m.apellido) AS medico_nombre,
+              m.cmp AS medico_cmp, m.especialidad AS medico_especialidad,
+              c.fecha_hora AS cita_fecha_hora, c.especialidad AS cita_especialidad, c.estado AS cita_estado,
+              rc.id AS id_receta_pdf, rc.es_contingencia, rc.url_descarga, rc.created_at AS receta_pdf_generada_en
+       FROM svc_pre.despachos d
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = d.id_paciente
+       LEFT JOIN svc_hcl.encuentros_clinicos ec ON ec.id_encuentro = d.id_encuentro_clinico
+       LEFT JOIN svc_med.medicos m ON m.id_medico = ec.id_medico
+       LEFT JOIN svc_cit.citas c ON c.id = ec.id_cita
+       LEFT JOIN svc_pre.recetas_contingencia rc ON rc.id_despacho = d.id
+       WHERE d.id = ?`,
+      [idDespacho]
+    );
+    return rows[0] || null;
   }
 
   // Enriquecimiento same-DB (no HTTP) — mismo patrón ya usado por el listado
@@ -65,6 +93,7 @@ class RecetasContingenciaMySQLRepository {
       id: row.id,
       idDespacho: row.id_despacho,
       idPaciente: row.id_paciente,
+      esContingencia: !!row.es_contingencia,
       medicamento: row.medicamento,
       dosis: row.dosis,
       cantidad: row.cantidad,

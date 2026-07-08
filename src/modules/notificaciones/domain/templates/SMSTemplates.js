@@ -55,6 +55,10 @@ const PLANTILLAS = Object.freeze({
     `Aquí tienes tu receta de ${medicamento || 'tu medicamento'} en PDF, preséntala en cualquier farmacia junto ` +
     `con tu documento de identidad: ${urlDescarga}`,
 
+  RecetaPDFDisponible: ({ medicamento, urlDescarga }) =>
+    `✅ MediCitas — Tu receta de ${medicamento || 'tu medicamento'} ya fue enviada a la farmacia. ` +
+    `Aquí tienes una copia en PDF para tus registros: ${urlDescarga}`,
+
 });
 
 // Tipos de evento que generan SMS — cualquier evento fuera de esta lista se ignora silenciosamente

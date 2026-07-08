@@ -16,10 +16,10 @@ const FarmaciaMockAdapter = require('../adapters/out/gateway/FarmaciaMockAdapter
 const FarmaciaAxiosAdapter = require('../adapters/out/gateway/FarmaciaAxiosAdapter');
 const PrescripcionesController = require('../adapters/in/PrescripcionesController');
 
-// Contingencia de farmacia (v2.1.0)
+// Receta en PDF (v2.1.0): en contingencia (CB abierto) Y en despacho exitoso
 const RecetasContingenciaMySQLRepository = require('../adapters/out/RecetasContingenciaMySQLRepository');
 const { RecetaPDFGenerator } = require('../adapters/out/pdf/RecetaPDFGenerator');
-const GenerarRecetaContingenciaUseCase = require('../application/use-cases/GenerarRecetaContingenciaUseCase');
+const GenerarRecetaPDFUseCase = require('../application/use-cases/GenerarRecetaPDFUseCase');
 const ConsultarRecetasContingenciaUseCase = require('../application/use-cases/ConsultarRecetasContingenciaUseCase');
 
 const dbPool = require('../../../config/database');
@@ -32,7 +32,7 @@ const repo = new DespachosMySQLRepository();
 const eventPublisher = new OutboxEventPublisher();
 const recetasContingenciaRepo = new RecetasContingenciaMySQLRepository();
 
-const generarContingenciaUseCase = new GenerarRecetaContingenciaUseCase({
+const generarRecetaPDFUseCase = new GenerarRecetaPDFUseCase({
   recetasContingenciaRepository: recetasContingenciaRepo,
   pdfGenerator: new RecetaPDFGenerator(),
   eventPublisher,
@@ -52,7 +52,7 @@ const iniciarDespachoUseCase = new IniciarDespachoUseCase({
   eventPublisher: eventPublisher,
   getConnection: async () => await dbPool.getConnection(),
   logger: require('../../../shared/logger/logger'),
-  generarContingenciaUseCase,
+  generarRecetaPDFUseCase,
 });
 
 const consultarEstadoRecetaUseCase = new ConsultarEstadoRecetaUseCase({
@@ -158,7 +158,7 @@ router.get('/', verifyToken, requireRole('Médico', 'Recepcionista', 'Auditor'),
       `SELECT d.id, d.id_paciente, d.estado, d.contenido, d.referencia_farmacia, d.motivo_rechazo,
               d.intentos_envio, d.correlation_id, d.fecha_emision, d.created_at,
               CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
-              rc.url_descarga AS contingencia_url_descarga
+              rc.url_descarga AS contingencia_url_descarga, rc.es_contingencia
        FROM svc_pre.despachos d
        LEFT JOIN svc_pac.pacientes p ON p.id_paciente = d.id_paciente
        LEFT JOIN svc_pre.recetas_contingencia rc ON rc.id_despacho = d.id
@@ -205,6 +205,17 @@ router.get('/contingencia/:id/pdf', async (req, res, next) => {
       return next(new DomainError('ERROR_LECTURA_PDF', 500, 'El archivo PDF no existe físicamente'));
     }
     res.download(rutaPdf, path.basename(rutaPdf));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Detalle completo de un despacho: hora, médico (con CMP), cita y farmacia —
+// distinto de GET /:id (que solo da el estado, para el panel de búsqueda rápida).
+router.get('/:id/detalle', verifyToken, requireRole(['Médico', 'Recepcionista', 'Auditor']), async (req, res, next) => {
+  try {
+    const detalle = await consultarRecetasContingenciaUseCase.obtenerDetalle(req.params.id);
+    res.json({ data: detalle, correlationId: req.correlationId, timestamp: new Date().toISOString() });
   } catch (err) {
     next(err);
   }

@@ -508,17 +508,23 @@ CREATE TABLE IF NOT EXISTS despachos (
 
 -- Contingencia de farmacia (v2.1.0): receta en PDF generada cuando el circuit
 -- breaker hacia farmacia-api está abierto — ver GenerarRecetaContingenciaUseCase.
+-- A pesar del nombre, cubre CUALQUIER receta generada en PDF — no solo
+-- contingencia (farmacia caída), también el despacho exitoso normal (ver
+-- GenerarRecetaPDFUseCase). es_contingencia distingue cuál de los dos casos
+-- generó el registro; el nombre de la tabla se conserva para no romper el
+-- historial de migraciones aplicadas contra la BD viva.
 CREATE TABLE IF NOT EXISTS recetas_contingencia (
-  id             VARCHAR(36)  NOT NULL,
-  id_despacho    VARCHAR(20)  NOT NULL,
-  id_paciente    VARCHAR(36)  NOT NULL,
-  medicamento    VARCHAR(200),
-  dosis          VARCHAR(100),
-  cantidad       VARCHAR(50),
-  ruta_pdf       VARCHAR(500) NOT NULL,
-  url_descarga   VARCHAR(500) NOT NULL,
-  correlation_id VARCHAR(36),
-  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id              VARCHAR(36)  NOT NULL,
+  id_despacho     VARCHAR(20)  NOT NULL,
+  id_paciente     VARCHAR(36)  NOT NULL,
+  medicamento     VARCHAR(200),
+  dosis           VARCHAR(100),
+  cantidad        VARCHAR(50),
+  es_contingencia TINYINT(1)   NOT NULL DEFAULT 1,
+  ruta_pdf        VARCHAR(500) NOT NULL,
+  url_descarga    VARCHAR(500) NOT NULL,
+  correlation_id  VARCHAR(36),
+  created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_despacho (id_despacho)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
