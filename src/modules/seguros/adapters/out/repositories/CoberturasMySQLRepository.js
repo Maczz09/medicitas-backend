@@ -1,5 +1,6 @@
 const { Cobertura }  = require('../../../domain/entities/Cobertura');
 const { DomainError } = require('../../../../../shared/domain/errors');
+const logger = require('../../../../../shared/logger/logger');
 
 class CoberturasMySQLRepository {
   constructor(pool) {
@@ -24,6 +25,11 @@ class CoberturasMySQLRepository {
         ]
       );
     } catch (err) {
+      // El error real (código MySQL, sqlMessage) se perdía antes de llegar a
+      // cualquier log — el caller solo veía este mensaje genérico. Costó
+      // reproducir en vivo un ER_TRUNCATED_WRONG_VALUE de `vigencia` por esto.
+      logger.error({ err: { code: err.code, sqlMessage: err.sqlMessage, message: err.message } },
+        '[CoberturasMySQLRepository] Fallo real al insertar validación de cobertura');
       throw new DomainError('ERROR_INTERNO_SEG', 500, 'Error al guardar la cobertura');
     }
   }
@@ -31,13 +37,20 @@ class CoberturasMySQLRepository {
   async findPendientes(limit) {
     const conn = await this.pool.getConnection();
     try {
+      // mysql2 no soporta LIMIT como parámetro ligado (?) en prepared
+      // statements — el protocolo binario del servidor lo rechaza con
+      // ER_WRONG_ARGUMENTS ("Incorrect arguments to mysqld_stmt_execute"),
+      // sin importar que el valor ya sea un number de JS. Se interpola
+      // directo, ya validado como entero — mismo patrón que
+      // PolizasCacheRepository.obtenerLoteParaReconciliar() en
+      // seguros-fallback-service.
+      const limiteSeguro = Number.isInteger(Number(limit)) ? Number(limit) : 20;
       const [rows] = await conn.execute(
         `SELECT id, id_paciente, id_aseguradora, numero_poliza, tipo_consulta, correlation_id
          FROM svc_seg.validaciones_cobertura
          WHERE estado_cobertura = 'PENDIENTE'
          ORDER BY created_at ASC
-         LIMIT ?`,
-        [limit]
+         LIMIT ${limiteSeguro}`
       );
       return rows.map((r) => ({
         id:           r.id,

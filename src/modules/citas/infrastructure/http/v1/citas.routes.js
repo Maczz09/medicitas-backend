@@ -102,10 +102,26 @@ router.get('/', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'),
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
     const offset = (page - 1) * limit;
     const estado = req.query.estado;
-    const where = estado ? 'WHERE c.estado = ?' : '';
-    const params = estado ? [estado] : [];
+    // Por defecto se excluyen las citas de pacientes con soft-delete (activo=0)
+    // de las vistas operativas (Recepción, Médico) — un paciente desactivado
+    // no debería seguir apareciendo para registrar ingreso, cobrar, etc.
+    // Auditoría sí necesita verlas todas para trazabilidad — pasa
+    // incluirInactivos=true explícitamente para no aplicar este filtro.
+    // LEFT JOIN + `p.activo IS NULL` cubre el caso (anómalo) de un paciente
+    // que ya no exista en absoluto, para no ocultar la cita silenciosamente.
+    const incluirInactivos = req.query.incluirInactivos === 'true';
+    const condiciones = [];
+    const params = [];
+    if (estado) { condiciones.push('c.estado = ?'); params.push(estado); }
+    if (!incluirInactivos) condiciones.push('(p.activo = 1 OR p.activo IS NULL)');
+    const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
 
-    const [countRows] = await dbPool.query(`SELECT COUNT(*) AS total FROM svc_cit.citas c ${where}`, params);
+    const [countRows] = await dbPool.query(
+      `SELECT COUNT(*) AS total FROM svc_cit.citas c
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = c.id_paciente
+       ${where}`,
+      params,
+    );
     const [rows] = await dbPool.query(
       `SELECT c.id, c.id_paciente, c.id_medico, c.fecha_hora, c.especialidad, c.estado,
               c.correlation_id, c.created_at,

@@ -73,6 +73,11 @@ class RecetaPDFGenerator {
         doc.text(`Paciente: ${receta.nombrePaciente}`);
       }
       doc.text(`ID Paciente: ${receta.idPaciente}`);
+      if (receta.idEncuentroClinico) {
+        // Mismo ID que agrupa esta receta en la cola de despacho de farmacia
+        // — permite cruzar manualmente el PDF contra esa pantalla.
+        doc.text(`ID Encuentro: ${receta.idEncuentroClinico}`);
+      }
       doc.moveDown(0.8);
 
       // ── Medicamento ───────────────────────────────────────────────────────────

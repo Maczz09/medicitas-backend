@@ -113,7 +113,7 @@ class WhatsappWebJSAdapter {
       puppeteer: {
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
-          '--no-sandbox', 
+          '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-accelerated-2d-canvas',
@@ -124,7 +124,32 @@ class WhatsappWebJSAdapter {
       }
     });
 
+    // Watchdog de arranque colgado: whatsapp-web.js/Puppeteer a veces se
+    // queda mudo a mitad de camino tras un restart — ni 'qr', ni 'ready', ni
+    // el rechazo de initialize() (que dispararía el catch de abajo) llegan
+    // nunca. Sin esto, el auto-heal por reintentos jamás se entera porque
+    // solo reacciona a un initialize() que efectivamente falla — y el
+    // servicio queda colgado indefinidamente (visto en vivo: 9+ min sin
+    // ningún log, requirió desvincular a mano vía /whatsapp/unlink).
+    // Se marca resuelto en 'qr'/'ready'/el catch — lo que ocurra primero.
+    const initTimeoutMs = parseInt(process.env.WA_INIT_TIMEOUT_MS || '60000');
+    let arranqueResuelto = false;
+    const watchdog = setTimeout(() => {
+      if (arranqueResuelto) return;
+      arranqueResuelto = true;
+      logger.error({ ms: initTimeoutMs },
+        '[WA-Adapter] Arranque colgado — pasó el margen sin "qr" ni "ready". Forzando reintento.');
+      this._manejarFalloInit(new Error(`Timeout de arranque (${initTimeoutMs}ms) sin qr/ready`));
+    }, initTimeoutMs);
+    const marcarArranqueResuelto = () => {
+      if (arranqueResuelto) return false;
+      arranqueResuelto = true;
+      clearTimeout(watchdog);
+      return true;
+    };
+
     this.client.on('qr', async (qr) => {
+      if (!marcarArranqueResuelto()) return;
       // Chromium arrancó y llegó hasta WhatsApp Web → el perfil está sano;
       // se resetea el contador de fallos de inicialización.
       this._intentosInit = 0;
@@ -140,6 +165,7 @@ class WhatsappWebJSAdapter {
     });
 
     this.client.on('ready', () => {
+      marcarArranqueResuelto();
       this._intentosInit = 0;
       this.isReady = true;
       this.currentQrDataUri = null;
@@ -159,7 +185,7 @@ class WhatsappWebJSAdapter {
 
     this.client.on('message_ack', async (msg, ack) => {
       if (!STATUS_CALLBACK) return;
-      
+
       let MessageStatus = 'sent';
       if (ack === 2) MessageStatus = 'delivered';
       if (ack === 3) MessageStatus = 'read';
@@ -178,32 +204,39 @@ class WhatsappWebJSAdapter {
     });
 
     this.client.initialize().catch(async (e) => {
-      this._intentosInit = (this._intentosInit || 0) + 1;
-      logger.error(
-        { error: e.message, intento: this._intentosInit },
-        '[WA-Adapter] Error al inicializar whatsapp-web.js'
-      );
-
-      // Cerrar el Chromium zombi del intento fallido antes de reintentar —
-      // si queda vivo, el siguiente intento choca contra su propio lock.
-      try { await this.client.destroy(); } catch { /* ya estaba muerto */ }
-
-      // Escalamiento de auto-recuperación:
-      //   Intento 1 falla → reintentar (limpiarLocksHuerfanos cubre locks
-      //     huérfanos de un contenedor anterior).
-      //   Intento 2 falla → el perfil está corrupto MÁS ALLÁ de los locks
-      //     (LevelDB/IndexedDB dañadas por un apagado no gracioso de
-      //     Docker/Windows). Sin esto, el retry giraba cada 5s contra la
-      //     misma carpeta rota para siempre y solo se salía borrándola a
-      //     mano. Perder la vinculación (re-escanear el QR) es preferible a
-      //     un servicio de notificaciones muerto hasta intervención manual.
-      if (this._intentosInit >= 2) {
-        this._borrarSesionCorrupta();
-      }
-
-      logger.warn(`[WA-Adapter] Reintentando inicialización en 5s (fallo #${this._intentosInit})...`);
-      setTimeout(() => this.initClient(), 5000);
+      if (!marcarArranqueResuelto()) return; // el watchdog ya se encargó
+      await this._manejarFalloInit(e);
     });
+  }
+
+  // Escalamiento de auto-recuperación, disparado por un initialize() que
+  // falla explícitamente O por el watchdog de arranque colgado:
+  //   Intento 1 falla → reintentar (limpiarLocksHuerfanos cubre locks
+  //     huérfanos de un contenedor anterior).
+  //   Intento 2 falla → el perfil está corrupto MÁS ALLÁ de los locks
+  //     (LevelDB/IndexedDB dañadas por un apagado no gracioso de
+  //     Docker/Windows, o un arranque colgado). Sin esto, el retry giraba
+  //     cada 5s contra la misma carpeta rota para siempre y solo se salía
+  //     borrándola a mano. Perder la vinculación (re-escanear el QR) es
+  //     preferible a un servicio de notificaciones muerto hasta
+  //     intervención manual.
+  async _manejarFalloInit(e) {
+    this._intentosInit = (this._intentosInit || 0) + 1;
+    logger.error(
+      { error: e.message, intento: this._intentosInit },
+      '[WA-Adapter] Error al inicializar whatsapp-web.js'
+    );
+
+    // Cerrar el Chromium zombi del intento fallido antes de reintentar —
+    // si queda vivo, el siguiente intento choca contra su propio lock.
+    try { await this.client.destroy(); } catch { /* ya estaba muerto */ }
+
+    if (this._intentosInit >= 2) {
+      this._borrarSesionCorrupta();
+    }
+
+    logger.warn(`[WA-Adapter] Reintentando inicialización en 5s (fallo #${this._intentosInit})...`);
+    setTimeout(() => this.initClient(), 5000);
   }
 
   _borrarSesionCorrupta() {

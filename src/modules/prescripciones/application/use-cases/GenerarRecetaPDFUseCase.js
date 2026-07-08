@@ -49,7 +49,11 @@ class GenerarRecetaPDFUseCase {
     const id = `RCT-${Date.now().toString(36).toUpperCase()}`;
     const { rutaPdf, urlDescarga } = await this.pdfGenerator.generar({
       id,
-      idPaciente:    despacho.idPaciente,
+      idPaciente:         despacho.idPaciente,
+      // El paciente/PDF no comparten ID con la cola de farmacia (que agrupa
+      // por idEncuentroClinico, no por despacho.id ni por el id del PDF) —
+      // se imprime para que se pueda cruzar manualmente contra esa cola.
+      idEncuentroClinico: despacho.idEncuentroClinico,
       nombrePaciente,
       medicamento:   contenido?.medicamento,
       dosis:         contenido?.dosis,

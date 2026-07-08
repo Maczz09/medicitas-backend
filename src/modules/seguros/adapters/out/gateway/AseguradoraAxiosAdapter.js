@@ -116,7 +116,13 @@ class AseguradoraAxiosAdapter {
           estadoCobertura:     'APROBADA',
           porcentajeCobertura: data.porcentajeCobertura,
           codigoAutorizacion:  null, // no hay código de autorización real: viene de caché, no de la aseguradora en vivo
-          vigencia:            data.fechaFin,
+          // seguros-fallback-service serializa su columna DATE como Date de JS
+          // → JSON la convierte a ISO completo ("...T00:00:00.000Z"). La
+          // columna `vigencia` de este lado es DATE puro y ese formato le
+          // provoca ER_TRUNCATED_WRONG_VALUE al insertar — silencioso, porque
+          // CoberturasMySQLRepository.save() traga el error real. Normalizamos
+          // a YYYY-MM-DD aquí, igual que ya hace findById() al leer.
+          vigencia:            data.fechaFin ? new Date(data.fechaFin).toISOString().split('T')[0] : null,
           esFallback:          true,
           origenFallback:      'CACHE',
         };

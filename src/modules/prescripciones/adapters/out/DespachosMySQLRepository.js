@@ -43,6 +43,13 @@ class DespachosMySQLRepository {
     return this._mapToDomain(rows[0]);
   }
 
+  // Escritura mínima y aislada del contador de intentos — separada de
+  // actualizarEstado() a propósito, para poder persistirse aun cuando el
+  // intento de envío falla y la transacción que lo envuelve hace rollback.
+  async actualizarIntentos(id, intentosEnvio, conn) {
+    await conn.query('UPDATE svc_pre.despachos SET intentos_envio = ? WHERE id = ?', [intentosEnvio, id]);
+  }
+
   async actualizarEstado(despacho, conn) {
     const query = `
       UPDATE svc_pre.despachos 

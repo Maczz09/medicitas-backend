@@ -23,25 +23,29 @@ const PLANTILLAS = Object.freeze({
   CitaReprogramada: ({ fechaNueva }) =>
     `MediCitas: Su cita fue reprogramada para el ${_fecha(fechaNueva)} a las ${_hora(fechaNueva)}.`,
 
-  CitaExpirada: ({ fechaHoraCita }) =>
-    `MediCitas: Su cita del ${_fecha(fechaHoraCita)} fue cancelada por inasistencia al superar los 15 min de tolerancia. Contáctenos al +51 1 234-5678 para reagendar.`,
+  CitaExpirada: ({ fechaHoraCita, minutosEsperados }) =>
+    `MediCitas: Su cita del ${_fecha(fechaHoraCita)} fue cancelada por inasistencia al superar los ${minutosEsperados || 15} min de tolerancia. Contáctenos al +51 1 234-5678 para reagendar.`,
 
   Recordatorio30m: ({ fechaHora, especialidad, pacienteNombre, medicoNombre }) =>
     `📅 Recordatorio Medicitas — Hola ${pacienteNombre}, tienes una cita con ${medicoNombre} (${especialidad}) ` +
     `HOY ${_fecha(fechaHora)} a las ${_hora(fechaHora)}. ` +
     `Por favor llega con 10 minutos de anticipación y trae tu documento de identidad.`,
 
-  AlertaRetraso: ({ minutoAlerta, pacienteNombre, medicoNombre, hora }) => {
+  // minutoAlerta/minutosRestantes llegan calculados desde el cron sobre la
+  // ventana que corresponda (15 min anticipada / 20 min reserva "en la hora"),
+  // así que el texto no puede fijar esos números — antes decía "15 minutos"
+  // y comparaba minutoAlerta === 5/10 aunque el checkpoint real de una
+  // reserva inmediata cae en 7/13, dejando el mensaje siempre en el genérico.
+  AlertaRetraso: ({ minutoAlerta, minutosRestantes, pacienteNombre, medicoNombre, hora }) => {
     if (minutoAlerta === 0) {
-      return `🔔 Medicitas — ${pacienteNombre}, tu cita con ${medicoNombre} acaba de comenzar a las ${hora}. Dirígete a la recepción de inmediato. Tienes 15 minutos de tolerancia.`;
+      return `🔔 Medicitas — ${pacienteNombre}, tu cita con ${medicoNombre} acaba de comenzar a las ${hora}. Dirígete a la recepción de inmediato. Tienes ${minutosRestantes} minutos de tolerancia.`;
     }
-    if (minutoAlerta === 5) {
-      return `⚠️ Medicitas — ${pacienteNombre}, han pasado 5 minutos desde tu cita con ${medicoNombre} (${hora}). Tienes 10 minutos más de tolerancia antes del cierre. ¡Date prisa!`;
+    const limite = minutoAlerta + (minutosRestantes ?? 0);
+    const esUltimoAviso = limite > 0 && minutosRestantes <= Math.round(limite / 3);
+    if (esUltimoAviso) {
+      return `⚠️ Medicitas — ${pacienteNombre}, ya van ${minutoAlerta} minutos desde tu cita con ${medicoNombre} (${hora}). Solo te quedan ${minutosRestantes} minutos antes de que sea marcada como NO ASISTIDA. Por favor, preséntate de inmediato.`;
     }
-    if (minutoAlerta === 10) {
-      return `⚠️ Medicitas — ${pacienteNombre}, ya van 10 minutos desde tu cita con ${medicoNombre} (${hora}). Solo te quedan 5 minutos antes de que sea marcada como NO ASISTIDA. Por favor, preséntate de inmediato.`;
-    }
-    return `MediCitas: Su cita ya comenzó hace ${minutoAlerta} min. Tiene tolerancia restante.`;
+    return `⚠️ Medicitas — ${pacienteNombre}, han pasado ${minutoAlerta} minutos desde tu cita con ${medicoNombre} (${hora}). Tienes ${minutosRestantes} minutos más de tolerancia antes del cierre. ¡Date prisa!`;
   },
 
   PagoAprobado: ({ montoCopago, tipoComprobante }) =>

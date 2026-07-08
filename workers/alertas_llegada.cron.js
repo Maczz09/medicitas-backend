@@ -83,12 +83,35 @@ async function processRecordatorios30m() {
   }
 }
 
+// Dos ventanas de tolerancia, no una sola:
+//   - Reserva ANTICIPADA (agendada con tiempo de sobra antes de la hora):
+//     15 min desde fecha_hora — el paciente tuvo aviso previo.
+//   - Reserva "EN LA HORA" (walk-in: el registro se creó casi al mismo
+//     tiempo que su propia fecha_hora): 20 min — el trámite de agendar +
+//     validar cobertura + cobrar + dar ingreso consume del mismo margen que
+//     la tolerancia, así que necesita más aire. Coincide con el criterio que
+//     ya usa el selector de turnos del frontend (SlotPicker: duracion-10min
+//     = 20 min para turnos de 30 min) para considerar un turno "aún vigente".
+// Se detecta comparando created_at contra fecha_hora — pero de forma
+// ASIMÉTRICA, no con una ventana simétrica de ±5 min: el SlotPicker del
+// frontend deja elegir un turno hasta LIMITE_INMEDIATA_MIN después de su
+// hora nominal (es "walk-in" tardío, no anticipado), así que registrar el
+// ingreso hasta ese mismo margen tarde debe seguir contando como "en la
+// hora". Antes se usaba ±5 min simétrico: una reserva creada, por ejemplo,
+// 18 min después de su fecha_hora (perfectamente elegible en el SlotPicker)
+// caía fuera de esa ventana y se clasificaba como ANTICIPADA — aplicándole
+// 15 min de tolerancia sobre una fecha_hora que ya tenía 18 min de retraso,
+// es decir, nacía prácticamente ya vencida.
+const LIMITE_ANTICIPADA_MIN = 15;
+const LIMITE_INMEDIATA_MIN = 20;
+const MARGEN_FUTURO_INMEDIATA_MIN = 5;
+
 async function processAlertasYExpiracion() {
   const now = new Date();
-  
+
   const [citas] = await db.query(
     `SELECT c.id, c.id_paciente, c.id_medico, c.fecha_hora, c.especialidad, c.correlation_id,
-            c.alerta_min0, c.alerta_min5, c.alerta_min10,
+            c.created_at, c.alerta_min0, c.alerta_min5, c.alerta_min10,
             CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
             p.telefono AS paciente_telefono,
             CONCAT('Dr. ', m.nombre, ' ', m.apellido) AS medico_nombre
@@ -101,25 +124,36 @@ async function processAlertasYExpiracion() {
   );
 
   for (const cita of citas) {
-    const diffMin = Math.floor((Date.now() - new Date(cita.fecha_hora).getTime()) / 60000);
-    const hora    = fmtHora(cita.fecha_hora);
-    console.log(`[DEBUG] Cita ${cita.id} | fecha_hora: ${cita.fecha_hora} | diffMin: ${diffMin} | Date.now(): ${new Date()} | parsed: ${new Date(cita.fecha_hora)}`);
+    const fechaCita = new Date(cita.fecha_hora);
+    const creada    = new Date(cita.created_at);
+    const diffMin   = Math.floor((Date.now() - fechaCita.getTime()) / 60000);
+    const hora      = fmtHora(cita.fecha_hora);
+
+    // Positivo cuando se creó DESPUÉS de su propia fecha_hora (walk-in tardío).
+    const minCreadaTrasFechaCita = (creada.getTime() - fechaCita.getTime()) / 60000;
+    const esReservaInmediata =
+      minCreadaTrasFechaCita <= LIMITE_INMEDIATA_MIN &&
+      minCreadaTrasFechaCita >= -MARGEN_FUTURO_INMEDIATA_MIN;
+    const limite = esReservaInmediata ? LIMITE_INMEDIATA_MIN : LIMITE_ANTICIPADA_MIN;
+    const checkpointTemprano = Math.round(limite / 3);
+    const checkpointTardio   = Math.round((limite * 2) / 3);
 
     const conn = await db.getConnection();
     await conn.beginTransaction();
     try {
-      if (diffMin >= 15) {
+      if (diffMin >= limite) {
         await conn.execute("UPDATE svc_cit.citas SET estado = 'No_Asistida' WHERE id = ?", [cita.id]);
-        
+
         await publicarEvento(conn, 'CitaExpirada', cita.id, {
           idCita: cita.id,
           idPaciente: cita.id_paciente,
           pacienteTelefono: cita.paciente_telefono,
-          fechaHoraCita: cita.fecha_hora
+          fechaHoraCita: cita.fecha_hora,
+          minutosEsperados: limite,
         });
-        
+
         await conn.commit();
-        console.log(`[AlertasLlegada] Cita ${cita.id} → No_Asistida`);
+        console.log(`[AlertasLlegada] Cita ${cita.id} → No_Asistida (límite ${limite}min, ${esReservaInmediata ? 'inmediata' : 'anticipada'})`);
 
         // Compensación: liberar el slot de la agenda del médico (idempotente).
         try {
@@ -129,53 +163,56 @@ async function processAlertasYExpiracion() {
           console.warn(`[AlertasLlegada] No se pudo liberar slot de cita ${cita.id}:`, err.message);
         }
 
-      } else if (diffMin >= 10 && !cita.alerta_min10) {
+      } else if (diffMin >= checkpointTardio && !cita.alerta_min10) {
         await conn.execute('UPDATE svc_cit.citas SET alerta_min10 = 1 WHERE id = ?', [cita.id]);
-        
+
         await publicarEvento(conn, 'AlertaRetraso', cita.id, {
           idCita: cita.id,
           idPaciente: cita.id_paciente,
           pacienteTelefono: cita.paciente_telefono,
-          minutoAlerta: 10,
+          minutoAlerta: diffMin,
+          minutosRestantes: limite - diffMin,
           pacienteNombre: cita.paciente_nombre,
           medicoNombre: cita.medico_nombre,
           hora
         });
 
         await conn.commit();
-        console.log(`[AlertasLlegada] Alerta min10 — cita ${cita.id}`);
+        console.log(`[AlertasLlegada] Alerta tardía (${diffMin}min, quedan ${limite - diffMin}) — cita ${cita.id}`);
 
-      } else if (diffMin >= 5 && !cita.alerta_min5) {
+      } else if (diffMin >= checkpointTemprano && !cita.alerta_min5) {
         await conn.execute('UPDATE svc_cit.citas SET alerta_min5 = 1 WHERE id = ?', [cita.id]);
-        
+
         await publicarEvento(conn, 'AlertaRetraso', cita.id, {
           idCita: cita.id,
           idPaciente: cita.id_paciente,
           pacienteTelefono: cita.paciente_telefono,
-          minutoAlerta: 5,
+          minutoAlerta: diffMin,
+          minutosRestantes: limite - diffMin,
           pacienteNombre: cita.paciente_nombre,
           medicoNombre: cita.medico_nombre,
           hora
         });
 
         await conn.commit();
-        console.log(`[AlertasLlegada] Alerta min5 — cita ${cita.id}`);
+        console.log(`[AlertasLlegada] Alerta temprana (${diffMin}min, quedan ${limite - diffMin}) — cita ${cita.id}`);
 
       } else if (diffMin >= 0 && !cita.alerta_min0) {
         await conn.execute('UPDATE svc_cit.citas SET alerta_min0 = 1 WHERE id = ?', [cita.id]);
-        
+
         await publicarEvento(conn, 'AlertaRetraso', cita.id, {
           idCita: cita.id,
           idPaciente: cita.id_paciente,
           pacienteTelefono: cita.paciente_telefono,
           minutoAlerta: 0,
+          minutosRestantes: limite,
           pacienteNombre: cita.paciente_nombre,
           medicoNombre: cita.medico_nombre,
           hora
         });
 
         await conn.commit();
-        console.log(`[AlertasLlegada] Alerta min0 — cita ${cita.id}`);
+        console.log(`[AlertasLlegada] Alerta min0 (tolerancia ${limite}min) — cita ${cita.id}`);
 
       } else {
         await conn.commit();
