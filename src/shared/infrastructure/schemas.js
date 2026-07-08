@@ -20,9 +20,15 @@ const crearCitaSchema = z.object({
   idPaciente: noVacio('idPaciente'),
   idMedico: noVacio('idMedico'),
   especialidad: noVacio('especialidad'),
+  // local:true además de offset:true — el frontend manda hora local del
+  // paciente/consultorio SIN offset a propósito (combinarFechaHora() en
+  // medicitas-frontend, comentario: "sin conversión UTC"; el resto del
+  // dominio de citas — Cita.js, reprogramar, tolerancia — asume esa misma
+  // convención). offset:true solo también sigue aceptando 'Z'/'+HH:MM' si
+  // algún caller futuro los manda.
   fechaHora: z
     .string({ error: 'fechaHora es obligatoria' })
-    .datetime({ offset: true, message: 'fechaHora debe ser una fecha-hora ISO 8601 válida (ej. 2026-07-10T15:00:00Z)' }),
+    .datetime({ offset: true, local: true, message: 'fechaHora debe ser una fecha-hora ISO 8601 válida (ej. 2026-07-10T15:00:00 o 2026-07-10T15:00:00Z)' }),
 });
 
 // ── Pagos: POST /api/v2/pagos ──────────────────────────────────────────────
