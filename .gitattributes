@@ -1,0 +1,27 @@
+# Normalización de fin de línea — evita que al clonar en otra máquina
+# (Windows con core.autocrlf=true, macOS, Linux) se corrompan los archivos
+# de configuración/arranque con CRLF. Todo lo que Docker/MySQL/Node consumen
+# como texto se fuerza a LF, independiente del SO del que clona.
+* text=auto eol=lf
+
+# Explícito para los archivos sensibles a fin de línea en el arranque:
+*.sql   text eol=lf
+*.sh    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.js    text eol=lf
+*.cjs   text eol=lf
+*.mjs   text eol=lf
+*.env   text eol=lf
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+.env.example    text eol=lf
+
+# Binarios — nunca tocar
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary

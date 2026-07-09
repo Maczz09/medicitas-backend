@@ -1,5 +1,5 @@
-version: '3.9'
-
+# La clave `version:` se removió: es obsoleta en Docker Compose v2 y solo
+# generaba un warning en cada comando. Compose infiere el esquema moderno.
 services:
 
   # ─── MYSQL ────────────────────────────────────────────────
@@ -72,6 +72,13 @@ services:
     container_name: medicitas_backend
     restart: unless-stopped
     env_file: .env
+    # host.docker.internal (usado en ASEGURADORA_API_URL) resuelve solo en
+    # Docker Desktop (Windows/macOS). En Docker sobre Linux NO existe salvo
+    # que se mapee explícitamente a la gateway del host — sin esto, en un PC
+    # Linux la validación de seguros falla con ENOTFOUND. host-gateway es un
+    # valor especial que Docker traduce a la IP del host en cualquier SO.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: America/Lima
       NODE_ENV: ${NODE_ENV}
