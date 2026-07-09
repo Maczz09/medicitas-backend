@@ -3,13 +3,50 @@ const { MensajeSMS }   = require('../../domain/entities/MensajeSMS');
 const { renderizar }   = require('../../domain/templates/SMSTemplates');
 const logger = require('../../../../shared/logger/logger');
 
+// Deriva un nombre de archivo legible a partir de la URL de descarga sin
+// depender de la forma del payload del evento (funciona igual para
+// comprobantes de facturación y recetas de prescripciones): las rutas de
+// descarga terminan en `/:id/pdf`, así que el penúltimo segmento es el id.
+function _nombreArchivoDesdeUrl(url, fallback = 'documento.pdf') {
+  try {
+    const partes = new URL(url).pathname.split('/').filter(Boolean);
+    const id = partes.length >= 2 ? partes[partes.length - 2] : null;
+    return id ? `${id}.pdf` : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 class NotificarPacienteUseCase {
-  constructor({ mensajesSMSRepository, smsGateway, pacienteTelefono, eventPublisher, getConnection }) {
-    this.smsRepo          = mensajesSMSRepository;
-    this.smsGateway       = smsGateway;
-    this.pacienteTelefono = pacienteTelefono;
-    this.eventPublisher   = eventPublisher;
-    this.getConnection    = getConnection;
+  constructor({ mensajesSMSRepository, smsGateway, pacienteTelefono, eventPublisher, getConnection, documentoDownloader }) {
+    this.smsRepo             = mensajesSMSRepository;
+    this.smsGateway          = smsGateway;
+    this.pacienteTelefono    = pacienteTelefono;
+    this.eventPublisher      = eventPublisher;
+    this.getConnection       = getConnection;
+    this.documentoDownloader = documentoDownloader;
+  }
+
+  // Si el evento trae `urlDescarga` (ComprobanteEmitido, RecetaPDFDisponible,
+  // RecetaContingenciaGenerada), intenta descargar el PDF a memoria y
+  // adjuntarlo por WhatsApp en vez de solo mandar el link. Si la descarga
+  // falla, el gateway no soporta adjuntos, o whatsapp-web.js rechaza el
+  // Base64, cae al texto plano con el link — el camino ya probado — para
+  // no perder la notificación ni colgar el worker de RabbitMQ.
+  async _enviarConDocumentoOFallback({ telefono, mensajeTexto, urlDescarga, idMensaje }) {
+    try {
+      const buffer        = await this.documentoDownloader.descargarBuffer(urlDescarga);
+      const base64Data    = buffer.toString('base64');
+      const nombreArchivo = _nombreArchivoDesdeUrl(urlDescarga);
+
+      return await this.smsGateway.enviarPDFBase64({ telefono, base64Data, nombreArchivo, mensajeTexto, idMensaje });
+    } catch (err) {
+      if (err.name === 'WhatsAppNotLinkedError') throw err; // mismo estado sin importar el camino
+
+      logger.warn({ error: err.message, urlDescarga },
+        '[Notificaciones] No se pudo adjuntar el PDF (descarga o envío falló). Enviando solo el texto con el link.');
+      return this.smsGateway.enviar({ telefono, mensaje: mensajeTexto, idMensaje });
+    }
   }
 
   async ejecutar(payload, tipoEvento, idEvento, correlationId) {
@@ -52,11 +89,9 @@ class NotificarPacienteUseCase {
     let payloadEvento;
 
     try {
-      const resultado = await this.smsGateway.enviar({
-        telefono,
-        mensaje: mensajeTexto,
-        idMensaje,
-      });
+      const resultado = payload.urlDescarga
+        ? await this._enviarConDocumentoOFallback({ telefono, mensajeTexto, urlDescarga: payload.urlDescarga, idMensaje })
+        : await this.smsGateway.enviar({ telefono, mensaje: mensajeTexto, idMensaje });
 
       // ── 5a. Éxito: construir entidad ENVIADO ────────────────────────────────
       mensajeSMS = MensajeSMS.crearEnviado({

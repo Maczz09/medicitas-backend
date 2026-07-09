@@ -107,6 +107,7 @@ async function bootstrap() {
     const { NotificacionesConsumer }     = require('./modules/notificaciones/consumer/notificaciones.consumer');
     const { MensajesSMSMySQLRepository } = require('./modules/notificaciones/adapters/out/repositories/MensajesSMSMySQLRepository');
     const { PacienteHttpAdapter: NotificacionesPacienteHttpAdapter }        = require('./modules/notificaciones/adapters/out/http/PacienteHttpAdapter');
+    const { DocumentoHttpAdapter }        = require('./modules/notificaciones/adapters/out/http/DocumentoHttpAdapter');
     const { OutboxMySQLPublisher: NotificacionesOutboxMySQLPublisher }       = require('./modules/notificaciones/adapters/out/events/OutboxMySQLPublisher');
     const { WhatsappWebJSAdapter }       = require('./modules/notificaciones/adapters/out/gateway/WhatsappWebJSAdapter');
     const { SMSMockAdapter }             = require('./modules/notificaciones/adapters/out/gateway/SMSMockAdapter');
@@ -137,6 +138,7 @@ async function bootstrap() {
       pacienteTelefono:      new NotificacionesPacienteHttpAdapter(),
       eventPublisher:        new NotificacionesOutboxMySQLPublisher(),
       getConnection:         async () => await database.getConnection(),
+      documentoDownloader:   new DocumentoHttpAdapter(),
     });
 
     const notificacionesConsumer = new NotificacionesConsumer(rabbitmq.getChannel(), useCase);

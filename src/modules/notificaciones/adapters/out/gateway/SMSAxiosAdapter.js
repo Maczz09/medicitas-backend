@@ -21,6 +21,13 @@ class SMSAxiosAdapter {
     }
   }
 
+  // Proveedor SMS de texto plano genérico — no soporta adjuntos/MMS en esta
+  // integración. El caller (NotificarPacienteUseCase) captura este error y
+  // hace fallback al texto plano con el link de descarga.
+  async enviarPDFBase64() {
+    throw new Error('SMSAxiosAdapter no soporta el envío de documentos adjuntos (solo SMS de texto).');
+  }
+
   async _llamarGateway({ telefono, mensaje, idMensaje }) {
     const url    = process.env.SMS_GATEWAY_URL;
     const apiKey = process.env.SMS_GATEWAY_KEY;

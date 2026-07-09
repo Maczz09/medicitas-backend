@@ -1,4 +1,4 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const qrcodeLib = require('qrcode');
 const logger = require('../../../../../shared/logger/logger');
@@ -294,6 +294,35 @@ class WhatsappWebJSAdapter {
     } catch (e) {
       logger.error({ error: e.message, destino: destinoMask }, '[WA-Adapter] Error al enviar mensaje');
       throw e; // Permitir que el consumer haga retry
+    }
+  }
+
+  // Adjunta un PDF ya en memoria (Base64) — nunca se lee ni se escribe a
+  // disco aquí. El caller (NotificarPacienteUseCase) es quien descarga/genera
+  // el buffer; este adaptador solo lo envuelve en MessageMedia y lo envía.
+  async enviarPDFBase64({ telefono, base64Data, nombreArchivo, mensajeTexto }) {
+    if (!this.isReady || !this.client || !this.client.info) {
+      logger.warn('[WA-Adapter] Cliente no listo. No se puede enviar PDF adjunto.');
+      throw new WhatsAppNotLinkedError('WhatsApp Web no está vinculado o no está listo.');
+    }
+
+    const destino = fmtWhatsApp(telefono);
+    const destinoMask = maskTelefono(telefono);
+
+    try {
+      const media = new MessageMedia('application/pdf', base64Data, nombreArchivo);
+      const msg = await conTimeout(
+        this.client.sendMessage(destino, media, { caption: mensajeTexto }),
+        WA_SEND_TIMEOUT_MS,
+        'WhatsApp.sendMessage(PDF)'
+      );
+      logger.info({ sid: msg.id.id, destino: destinoMask, nombreArchivo },
+        '[WA-Adapter] PDF adjunto enviado por whatsapp-web.js');
+      return { exitoso: true, referencia: msg.id.id };
+    } catch (e) {
+      logger.error({ error: e.message, destino: destinoMask, nombreArchivo },
+        '[WA-Adapter] Error al enviar PDF adjunto');
+      throw e; // Permitir que el caller haga fallback a texto plano
     }
   }
 }
