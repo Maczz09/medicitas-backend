@@ -25,6 +25,7 @@ INSERT IGNORE INTO roles (id_rol, nombre, descripcion) VALUES
 CREATE TABLE IF NOT EXISTS usuarios (
   id_usuario    VARCHAR(36)   NOT NULL DEFAULT (UUID()),
   id_rol        INT           NOT NULL,
+  id_medico     VARCHAR(36)   NULL,
   nombre        VARCHAR(100)  NOT NULL,
   apellido      VARCHAR(100)  NOT NULL,
   email         VARCHAR(255)  NOT NULL,
@@ -115,7 +116,7 @@ CREATE DATABASE IF NOT EXISTS svc_cit CHARACTER SET utf8mb4 COLLATE utf8mb4_unic
 USE svc_cit;
 
 CREATE TABLE IF NOT EXISTS citas (
-  id              VARCHAR(20)  NOT NULL,
+  id              VARCHAR(36)  NOT NULL,
   id_paciente     VARCHAR(36)  NOT NULL,
   id_medico       VARCHAR(36)  NOT NULL,
   fecha_hora      DATETIME     NOT NULL,
@@ -128,6 +129,7 @@ CREATE TABLE IF NOT EXISTS citas (
                     'No_Asistida'
                   ) NOT NULL DEFAULT 'Pendiente',
   correlation_id  VARCHAR(36)  NULL,
+  recordatorio_30m TINYINT(1)  NOT NULL DEFAULT 0,
   alerta_min0     TINYINT(1)   NOT NULL DEFAULT 0,
   alerta_min5     TINYINT(1)   NOT NULL DEFAULT 0,
   alerta_min10    TINYINT(1)   NOT NULL DEFAULT 0,
@@ -203,6 +205,7 @@ CREATE TABLE IF NOT EXISTS prescripciones_clinicas (
   dosis         VARCHAR(100)  NOT NULL,
   frecuencia    VARCHAR(100)  NOT NULL,
   duracion      VARCHAR(100),
+  cantidad      INT           NOT NULL DEFAULT 1,
   indicaciones  TEXT,
   created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id_prescripcion)
@@ -257,17 +260,20 @@ CREATE TABLE IF NOT EXISTS validaciones_cobertura (
   INDEX idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Convención corregida a la que realmente usa el código (drift histórico,
+-- igual que validaciones_cobertura arriba): OutboxMySQLPublisher.js de
+-- seguros inserta (id, evento, payload, correlation_id), no
+-- (id_evento, tipo_evento, estado) — la BD viva ya tenía la forma correcta.
 CREATE TABLE IF NOT EXISTS outbox (
-  id_evento     VARCHAR(36)  NOT NULL,
-  tipo_evento   VARCHAR(100) NOT NULL,
-  payload       JSON         NOT NULL,
-  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
-  intentos      INT          NOT NULL DEFAULT 0,
-  correlation_id VARCHAR(36) NOT NULL,
-  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  publicado_en  TIMESTAMP    NULL,
-  error_msg     TEXT,
-  PRIMARY KEY (id_evento)
+  id             VARCHAR(36)  NOT NULL,
+  evento         VARCHAR(60)  NOT NULL,
+  payload        JSON         NOT NULL,
+  correlation_id VARCHAR(36)  NULL,
+  publicado      TINYINT(1)   NOT NULL DEFAULT 0,
+  intentos       INT          NOT NULL DEFAULT 0,
+  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_publicado (publicado, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ═══════════════════════════════════════════════════════════
@@ -281,11 +287,11 @@ CREATE TABLE IF NOT EXISTS pagos (
   id_cita           VARCHAR(36)   NOT NULL,
   id_paciente       VARCHAR(36)   NOT NULL,
   codigo_autorizacion VARCHAR(100),
-  metodo_pago       ENUM('EFECTIVO', 'TARJETA_CREDITO', 'TARJETA_DEBITO', 'SEGURO') NOT NULL,
+  metodo_pago       ENUM('EFECTIVO', 'POS', 'TARJETA_CREDITO', 'TARJETA_DEBITO', 'SEGURO') NOT NULL,
   monto_total       DECIMAL(10,2) NOT NULL,
   monto_cobertura   DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   monto_copago      DECIMAL(10,2) NOT NULL,
-  estado            ENUM('PROCESADO', 'PENDIENTE', 'REVERSADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  estado            ENUM('APROBADO', 'PROCESADO', 'PENDIENTE', 'REVERSADO', 'FALLIDO') NOT NULL DEFAULT 'APROBADO',
   tipo_comprobante  ENUM('BOLETA', 'FACTURA') NOT NULL DEFAULT 'BOLETA',
   numero_comprobante VARCHAR(20),
   created_at        TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -312,6 +318,66 @@ CREATE TABLE IF NOT EXISTS eventos_procesados (
   procesado_en TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id_evento, consumidor)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ═══════════════════════════════════════════════════════════
+-- SVC-FAC-010 — invoicing_service (comprobantes: boleta/factura)
+-- Esquema faltante en init.sql: existía en la BD viva (creado fuera de
+-- banda en algún momento) pero nunca se agregó aquí, así que una BD nueva
+-- solo tenía la fila suelta de INSERT de series_comprobante al final del
+-- archivo sin la tabla/base detrás — eso hacía abortar init.sql completo
+-- en una instalación limpia ("Unknown database 'svc_fac'").
+-- ═══════════════════════════════════════════════════════════
+CREATE DATABASE IF NOT EXISTS svc_fac CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE svc_fac;
+
+CREATE TABLE IF NOT EXISTS comprobantes (
+  id                    VARCHAR(50)   NOT NULL,
+  id_pago               VARCHAR(50)   NOT NULL,
+  id_paciente           VARCHAR(50)   NOT NULL,
+  id_cita               VARCHAR(50)   NOT NULL,
+  tipo                  ENUM('BOLETA','FACTURA') NOT NULL DEFAULT 'BOLETA',
+  numero                VARCHAR(50)   NOT NULL,
+  monto_total           DECIMAL(10,2) NOT NULL,
+  monto_cubierto_seguro DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  monto_copago          DECIMAL(10,2) NOT NULL,
+  metodo_pago           VARCHAR(20)   NOT NULL,
+  tiene_cobertura       TINYINT(1)    NOT NULL DEFAULT 0,
+  estado                ENUM('PENDIENTE','EMITIDO','ERROR') NOT NULL DEFAULT 'PENDIENTE',
+  ruta_pdf              VARCHAR(500),
+  url_descarga          VARCHAR(500),
+  nombre_paciente       VARCHAR(200),
+  error_mensaje         TEXT,
+  intentos_generacion   INT           NOT NULL DEFAULT 0,
+  correlation_id        VARCHAR(36),
+  created_at            TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_pago (id_pago),
+  UNIQUE KEY uk_numero (numero),
+  KEY idx_paciente (id_paciente),
+  KEY idx_estado (estado),
+  KEY idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS series_comprobante (
+  tipo   VARCHAR(20) NOT NULL,
+  ultimo INT         NOT NULL DEFAULT 0,
+  PRIMARY KEY (tipo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS outbox (
+  id             VARCHAR(36)  NOT NULL,
+  evento         VARCHAR(60)  NOT NULL,
+  payload        JSON         NOT NULL,
+  correlation_id VARCHAR(36),
+  publicado      TINYINT(1)   NOT NULL DEFAULT 0,
+  intentos       INT          NOT NULL DEFAULT 0,
+  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_publicado (publicado, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO svc_fac.series_comprobante (tipo, ultimo) VALUES ('BOLETA', 0), ('FACTURA', 0) ON DUPLICATE KEY UPDATE ultimo=ultimo;
 
 -- ═══════════════════════════════════════════════════════════
 -- SVC-PAC-005 — patients_service
@@ -514,6 +580,22 @@ CREATE TABLE IF NOT EXISTS eventos_procesados (
   PRIMARY KEY (id_evento, consumidor)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Faltaba por completo en este archivo (existía en la BD viva, creada fuera
+-- de banda) — OutboxMySQLPublisher.js de notificaciones inserta acá en
+-- cada evento saliente; sin esta tabla, una instalación nueva rompe la
+-- primera vez que se intenta notificar por WhatsApp/SMS.
+CREATE TABLE IF NOT EXISTS outbox (
+  id             VARCHAR(36)  NOT NULL,
+  evento         VARCHAR(60)  NOT NULL,
+  payload        JSON         NOT NULL,
+  correlation_id VARCHAR(36)  NULL,
+  publicado      TINYINT(1)   NOT NULL DEFAULT 0,
+  intentos       INT          NOT NULL DEFAULT 0,
+  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_publicado (publicado, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ═══════════════════════════════════════════════════════════
 -- SVC-AUD-008 — audit_service
 -- ═══════════════════════════════════════════════════════════
@@ -628,58 +710,6 @@ CREATE TABLE IF NOT EXISTS eventos_procesados (
   PRIMARY KEY (id_evento, consumidor)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ═══════════════════════════════════════════════════════════
--- SVC-HCL-002 — clinical_record_service
--- ═══════════════════════════════════════════════════════════
-CREATE DATABASE IF NOT EXISTS svc_hcl CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE svc_hcl;
-
-CREATE TABLE IF NOT EXISTS expedientes (
-  id              VARCHAR(36)   NOT NULL,
-  id_paciente     VARCHAR(36)   NOT NULL,
-  grupo_sanguineo VARCHAR(5)    NULL,
-  alergias        JSON          NULL,
-  created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uq_paciente (id_paciente)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS encuentros_clinicos (
-  id              VARCHAR(36)   NOT NULL,
-  id_expediente   VARCHAR(36)   NOT NULL,
-  id_cita         VARCHAR(36)   NOT NULL,
-  id_medico       VARCHAR(36)   NOT NULL,
-  diagnostico_cie10 VARCHAR(10) NOT NULL,
-  descripcion     TEXT          NULL,
-  fecha_encuentro TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  FOREIGN KEY (id_expediente) REFERENCES expedientes(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS prescripciones_clinicas (
-  id_prescripcion VARCHAR(36)   NOT NULL DEFAULT (uuid()),
-  id_encuentro    VARCHAR(36)   NOT NULL,
-  id_paciente     VARCHAR(36)   NOT NULL,
-  medicamento     VARCHAR(200)  NOT NULL,
-  dosis           VARCHAR(100)  NOT NULL,
-  frecuencia      VARCHAR(100)  NOT NULL,
-  duracion        VARCHAR(100)  NULL,
-  cantidad        INT           NOT NULL DEFAULT 1,
-  indicaciones    TEXT          NULL,
-  created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id_prescripcion)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS outbox (
-  id            VARCHAR(36)  NOT NULL,
-  evento        VARCHAR(100) NOT NULL,
-  payload       JSON         NOT NULL,
-  correlation_id VARCHAR(36) NULL,
-  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
-  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- ─────────────────────────────────────────────────────────
 -- Permisos
 -- ─────────────────────────────────────────────────────────
@@ -694,5 +724,5 @@ GRANT ALL PRIVILEGES ON svc_hor.*         TO 'medicitas_app'@'%';
 GRANT ALL PRIVILEGES ON svc_not.*         TO 'medicitas_app'@'%';
 GRANT ALL PRIVILEGES ON svc_aud.*         TO 'medicitas_app'@'%';
 GRANT ALL PRIVILEGES ON svc_pre.*         TO 'medicitas_app'@'%';
+GRANT ALL PRIVILEGES ON svc_fac.*         TO 'medicitas_app'@'%';
 FLUSH PRIVILEGES;
-INSERT INTO svc_fac.series_comprobante (tipo, ultimo) VALUES ('BOLETA', 0), ('FACTURA', 0) ON DUPLICATE KEY UPDATE ultimo=ultimo;
