@@ -240,11 +240,36 @@ services:
     ports:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      # Persistencia: sin esto, cada reinicio de Loki borraba TODO el historial
+      # de logs (almacenaba en /loki dentro del contenedor efímero). Con el
+      # volumen, los logs sobreviven a reinicios — necesario para auditar.
+      - loki_data:/loki
     networks:
       - medicitas_net
       # Red compartida: permite que farmacia-api y aseguradora-api envíen
       # sus logs estructurados (pino-loki) directamente a http://loki:3100
       - medicitas_shared_net
+
+  # ─── PROMTAIL (colector de logs → Loki) ───────────────────
+  # Lee el stdout JSON de los contenedores de medicitas vía la API de Docker y
+  # lo reenvía a Loki. Reemplaza el push directo con pino-loki, que moría en
+  # silencio si Loki no estaba listo al arrancar o si Loki reiniciaba. Promtail
+  # reintenta/reconecta solo, desacoplando el logging de la salud de Loki.
+  promtail:
+    image: grafana/promtail:3.5.5
+    container_name: medicitas_promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./monitoring/promtail/config.yml:/etc/promtail/config.yml:ro
+      # Socket de Docker: Promtail descubre contenedores y lee sus logs.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_data:/promtail
+    depends_on:
+      - loki
+    networks:
+      - medicitas_net
 
   # ─── JAEGER (Tracing distribuido) ──────────────────────────
   # all-in-one: collector + query + UI + almacenamiento en memoria.
@@ -324,6 +349,8 @@ volumes:
   recetas_storage:
   prometheus_data:
   grafana_data:
+  loki_data:
+  promtail_data:
 
 networks:
   medicitas_net:

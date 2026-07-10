@@ -1,70 +1,56 @@
 const pino = require('pino');
 const asyncContext = require('./asyncContext');
 
-// Loki se activa de forma explícita con LOKI_HOST (independiente de NODE_ENV)
-// o implícita en production/docker. Con NODE_ENV=development y sin LOKI_HOST,
-// se usa pino-pretty y los logs NUNCA llegan a Grafana.
+// ─── Modelo de observabilidad ─────────────────────────────────────────────────
+// En modo "observabilidad" (LOKI_HOST seteado, o NODE_ENV production/docker) la
+// app emite JSON de UNA sola línea a stdout y NADA MÁS. El envío a Loki lo hace
+// un colector externo (Promtail) que lee el stdout del contenedor y lo reenvía
+// a Loki con reintentos y reconexión propios.
+//
+// Por qué se quitó pino-loki (push directo desde el proceso):
+//   Se verificó en vivo que pino-loki 3.0.0 NO se recupera cuando Loki se cae,
+//   reinicia, o cuando la app arranca antes que Loki (su `depends_on` no lo
+//   incluye y la imagen de Loki es distroless, no healthcheckeable). El push
+//   muere en silencio para TODA la vida del proceso: stdout sigue, pero a
+//   Grafana no vuelve a llegar nada hasta reiniciar la app. Ese era el motivo
+//   real de "no sale nada en Grafana Loki".
+//   Además, acoplar el arranque/salud de la API a la infra de logs es incorrecto
+//   — la API debe seguir viva aunque Loki no esté. Con el colector externo, el
+//   logging queda 100% desacoplado: si Loki se cae, la app sigue escribiendo a
+//   stdout y Promtail se pone al día cuando Loki vuelve.
 const isProduction = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'docker';
-const usarLoki = !!process.env.LOKI_HOST || isProduction;
+const modoObservabilidad = !!process.env.LOKI_HOST || isProduction;
 
-// CRÍTICO: cuando Loki está activo, el log NUNCA debe depender exclusivamente
-// de él — si Loki se cae o hay un corte de DNS momentáneo (pasa en cada
-// recreación de contenedores), pino-loki descarta el batch en silencio y esas
-// líneas desaparecen para siempre: no llegan a Grafana NI a `docker logs`.
-// Con `targets`, stdout (pino-pretty) y Loki corren en paralelo e
-// independientes — `docker logs` sigue siendo la fuente de verdad pase lo
-// que pase con Loki.
-const transport = usarLoki
-  ? pino.transport({
-      targets: [
-        {
-          target: 'pino-pretty',
-          level: process.env.LOG_LEVEL || 'info',
-          options: { colorize: true, translateTime: 'SYS:standard' },
-        },
-        {
-          target: 'pino-loki',
-          level: process.env.LOG_LEVEL || 'info',
-          options: {
-            batching: true,
-            interval: 5,
-            host: process.env.LOKI_HOST || 'http://loki:3100',
-            // La etiqueta `app` distingue el emisor en Grafana (backend vs workers)
-            labels: { app: process.env.LOKI_APP_LABEL || 'medicitas-backend' },
-          },
-        },
-      ],
-    })
+// En dev local (sin Loki) usamos pino-pretty para leer cómodo en la terminal.
+// En modo observabilidad NO se usa transport: pino escribe JSON directo a stdout
+// (fd 1), síncrono y sin worker threads que puedan morir en silencio.
+const transport = modoObservabilidad
+  ? undefined
   : pino.transport({
       target: 'pino-pretty',
-      options: {
-        colorize: true,
-        translateTime: 'SYS:standard'
-      }
+      options: { colorize: true, translateTime: 'SYS:standard' },
     });
 
-const pinoLogger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  // NUNCA usar formatters.level con pino.transport({ targets: [...] }):
-  // el filtrado por nivel de cada target compara internamente el nivel
-  // NUMÉRICO original — si formatters.level lo reescribe a string ('INFO')
-  // antes de que el mensaje se despache a los worker threads, la comparación
-  // falla en silencio y CADA mensaje se descarta sin ningún error visible
-  // (ni en stdout ni en Loki). Costó un buen rato diagnosticarlo porque no
-  // hay excepción ni log de fallo — simplemente nada llega a ningún lado.
-  //
-  // pino-loki necesita `time` numérico (epoch ms) para construir el timestamp
-  // del push; con isoTime genera NaN y Loki rechaza TODOS los lotes.
-  timestamp: usarLoki ? pino.stdTimeFunctions.epochTime : pino.stdTimeFunctions.isoTime,
-  mixin() {
-    const store = asyncContext.getStore();
-    return { 
-      correlationId: store ? store.get('correlationId') : undefined,
-      operation: store ? store.get('operation') : undefined,
-      orderId: store ? store.get('orderId') : undefined
-    };
-  }
-}, transport);
+const pinoLogger = pino(
+  {
+    level: process.env.LOG_LEVEL || 'info',
+    // `app` identifica al emisor (backend vs workers). Promtail lo copia al
+    // label `app` de Loki — las dashboards consultan {app="medicitas-backend"}.
+    base: { app: process.env.LOKI_APP_LABEL || 'medicitas-backend', pid: process.pid },
+    // ISO legible; Promtail usa el timestamp del propio stream de Docker, así
+    // que el formato exacto aquí no afecta el orden en Loki.
+    timestamp: pino.stdTimeFunctions.isoTime,
+    mixin() {
+      const store = asyncContext.getStore();
+      return {
+        correlationId: store ? store.get('correlationId') : undefined,
+        operation: store ? store.get('operation') : undefined,
+        orderId: store ? store.get('orderId') : undefined,
+      };
+    },
+  },
+  transport,
+);
 
 const logger = {
   info: (data, message) => {

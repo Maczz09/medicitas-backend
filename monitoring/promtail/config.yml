@@ -1,0 +1,53 @@
+# Promtail — colector de logs desacoplado.
+# Lee el stdout (JSON) de los contenedores del stack medicitas vía la API de
+# Docker y lo reenvía a Loki. A diferencia del push directo con pino-loki (que
+# moría en silencio si Loki no estaba listo), Promtail reintenta y reconecta
+# solo, así que sobrevive a la carrera de arranque y a reinicios de Loki.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  # Persistido en un volumen para no re-leer logs viejos tras un reinicio.
+  filename: /promtail/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    # Reintentos ante Loki no disponible (arranque o reinicio). Mientras tanto
+    # los logs se acumulan y se envían cuando Loki vuelve.
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+
+scrape_configs:
+  - job_name: medicitas
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 10s
+    relabel_configs:
+      # Conservar SOLO los contenedores del monolito que emiten JSON estructurado.
+      # Los servicios externos (farmacia/aseguradora/seguros) tienen su propio
+      # envío de logs; incluirlos aquí duplicaría sus líneas en Loki.
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(medicitas_backend|medicitas_workers)'
+        action: keep
+      # Label estable presente incluso en líneas no-JSON (arte ASCII del QR, etc.)
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: container
+    pipeline_stages:
+      # Parsear el JSON de la app. Si una línea no es JSON, esta etapa no falla
+      # el pipeline: la línea igual se ingesta (con el label `container`), solo
+      # que sin los labels extraídos.
+      - json:
+          expressions:
+            app: app
+            level: level
+      # Promover a labels de Loki SOLO campos de baja cardinalidad.
+      # correlationId NO se pone como label (alta cardinalidad rompería Loki);
+      # queda en el cuerpo JSON y se consulta con:  | json | correlationId="..."
+      - labels:
+          app:
+          level:
