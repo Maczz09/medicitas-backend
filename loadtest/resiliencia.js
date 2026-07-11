@@ -29,6 +29,10 @@ const DURATION = __ENV.DURATION || '2m';
 const CONTROL_PATH = __ENV.CONTROL_PATH || '/api/v2/medicos';
 const TARGET_PATH = __ENV.TARGET_PATH || '/api/v2/citas';
 
+// 404/409/422 no son fallas; el 503 SÍ se cuenta (es la señal de degradación
+// del módulo dado de baja — no lo enmascaramos).
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 404, 409, 422));
+
 const errores5xx = new Rate('errores_5xx');
 const rechazos503 = new Rate('rechazos_503');
 
@@ -53,7 +57,7 @@ export const options = {
 let token = null;
 export function setup() {
   const res = http.post(`${BASE}/api/v2/auth/login`,
-    JSON.stringify({ email: 'recepcion@medicitas.pe', password: 'Medicitas2026!' }),
+    JSON.stringify({ email: 'auditor@medicitas.pe', password: 'Medicitas2026!' }),
     { headers: { 'Content-Type': 'application/json' } });
   const t = res.json('accessToken');
   if (!t) throw new Error(`Login falló (status ${res.status})`);

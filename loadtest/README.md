@@ -28,24 +28,25 @@ Esto activa (solo mientras uses el override):
 - `DB_POOL_SIZE=20` por worker y `max_connections=500` en MySQL.
 - `USE_MOCK_SMS=true` → sin Chromium/WhatsApp durante la carga.
 
-Ajuste por máquina (opcional):
+Los defaults ya vienen **right-sized** (6 workers × pool 8 = 48 conexiones), que
+funciona bien tanto en el desktop (Ryzen 12t) como en la laptop i5, así que
+**normalmente NO hace falta ajustar nada** — el comando de arriba es suficiente.
+
+> Por qué 6/8 y no más: en la 1ª corrida se usaban 10 workers × 20 pool = 200
+> conexiones, y MySQL colapsaba a 800% CPU con ~200 queries a la vez (thrashing),
+> por eso el 500k se estancaba en 141k. El cuello de botella NO es Node sino
+> MySQL: el total de conexiones debe rondar 3-4× los cores, no saturar.
+
+Ajuste opcional (solo si quieres experimentar):
 
 ```bash
-# Linux / Mac / Git-Bash  (sintaxis VAR=valor comando)
-# Desktop 12 vCPU
-WEB_CONCURRENCY=10 DB_POOL_SIZE=20 docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
-# Laptop i5 (~8 hilos)
-WEB_CONCURRENCY=6  DB_POOL_SIZE=20 docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+# Linux / Mac / Git-Bash
+WEB_CONCURRENCY=8 DB_POOL_SIZE=8 docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
 ```
-
 ```powershell
-# Windows PowerShell  (¡NO acepta VAR=valor en línea! usar $env:)
-# Desktop 12 vCPU
-$env:WEB_CONCURRENCY=10; $env:DB_POOL_SIZE=20; docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
-# Laptop i5 (~8 hilos)
-$env:WEB_CONCURRENCY=6;  $env:DB_POOL_SIZE=20; docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
-# Limpiar las variables luego (opcional):
-Remove-Item Env:WEB_CONCURRENCY, Env:DB_POOL_SIZE
+# Windows PowerShell (NO acepta VAR=valor en línea; usar $env:)
+$env:WEB_CONCURRENCY=8; $env:DB_POOL_SIZE=8; docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+Remove-Item Env:WEB_CONCURRENCY, Env:DB_POOL_SIZE   # limpiar luego
 ```
 
 Regla de oro: `WEB_CONCURRENCY × DB_POOL_SIZE < 500` (max_connections de MySQL).
@@ -56,13 +57,18 @@ No hace falta instalar k6: los runners usan el contenedor `grafana/k6` dentro de
 la red del stack, apuntando a `http://backend:3000` (app directo, evita el
 rate-limit de nginx).
 
+Los niveles son de **LECTURA** (miden el techo de throughput). Las escrituras
+(INSERT + evento outbox, serializadas por la BD) van en una prueba aparte
+(`escrituras`) para no ser el freno del test de volumen.
+
 ```bash
 # Linux / Mac / Git-Bash
 cd loadtest
-./run.sh smoke      # humo (50 req) — sanity
-./run.sh nivel1     # 1 000
-./run.sh nivel2     # 500 000
-./run.sh nivel3     # 1 000 000
+./run.sh smoke       # humo (50 req) — sanity
+./run.sh nivel1      # 1 000    lecturas
+./run.sh nivel2      # 500 000  lecturas
+./run.sh nivel3      # 1 000 000 lecturas
+./run.sh escrituras  # 20 000 creaciones (camino de escritura + eventos)
 ```
 
 ```powershell
@@ -72,9 +78,10 @@ cd loadtest
 .\run.ps1 nivel1
 .\run.ps1 nivel2
 .\run.ps1 nivel3
+.\run.ps1 escrituras
 ```
 
-Variables útiles: `VUS`, `WRITE_RATIO` (fracción de escrituras, default 0.10).
+Variables útiles: `VUS` (concurrencia), `TOTAL` (para `escrituras`), `WRITE_RATIO`.
 Para pegarle por el gateway realista en vez del app directo:
 `BASE_URL=http://nginx:80 ./run.sh nivel1` (ojo: nginx impone su propio
 rate-limit de 30 r/s; para carga real conviene el app directo).

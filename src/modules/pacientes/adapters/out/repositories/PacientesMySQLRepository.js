@@ -27,21 +27,35 @@ class PacientesMySQLRepository {
       estado === 'todos'    ? '1=1' :
       'activo = 1';
 
-    const searchPattern = `%${query || ''}%`;
+    // Solo cuando hay término de búsqueda pagamos el LIKE (con comodín inicial
+    // NO usa índice → escaneo). El caso común —listar sin buscar— evita las 3
+    // comparaciones LIKE por completo. Además se quitó SQL_CALC_FOUND_ROWS
+    // (deprecado y lento: forzaba a MySQL a materializar TODO el resultado
+    // ignorando el LIMIT en cada request); el total se cuenta aparte con un
+    // COUNT(*) sobre el mismo filtro. Con el índice (activo, created_at) el
+    // listado sin búsqueda queda ordenado por índice, sin filesort.
+    const term = (query || '').trim();
+    const params = [];
+    let whereBusqueda = '';
+    if (term) {
+      const searchPattern = `%${term}%`;
+      whereBusqueda = ' AND (nombre LIKE ? OR apellido LIKE ? OR numero_documento LIKE ?)';
+      params.push(searchPattern, searchPattern, searchPattern);
+    }
+
     const [rows] = await conn.query(
-      `SELECT SQL_CALC_FOUND_ROWS *
+      `SELECT *
        FROM svc_pac.pacientes
-       WHERE ${filtroActivo} AND (
-         nombre LIKE ? OR
-         apellido LIKE ? OR
-         numero_documento LIKE ?
-       )
+       WHERE ${filtroActivo}${whereBusqueda}
        ORDER BY created_at DESC
        LIMIT ? OFFSET ?`,
-      [searchPattern, searchPattern, searchPattern, limit, offset]
+      [...params, limit, offset]
     );
 
-    const [[{ total }]] = await conn.query(`SELECT FOUND_ROWS() as total`);
+    const [[{ total }]] = await conn.query(
+      `SELECT COUNT(*) AS total FROM svc_pac.pacientes WHERE ${filtroActivo}${whereBusqueda}`,
+      params
+    );
     return { data: rows, total };
   }
 

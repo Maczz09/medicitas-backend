@@ -16,18 +16,21 @@
 #                             (libera CPU/RAM durante la carga).
 #   - MySQL max_connections=500 → headroom para (workers × DB_POOL_SIZE).
 #
-# Ajuste por máquina (opcional, por variable de entorno al levantar):
-#   Desktop 12 vCPU:  WEB_CONCURRENCY=10 DB_POOL_SIZE=20   (10×20=200 < 500)
-#   Laptop i5 (~8t):  WEB_CONCURRENCY=6  DB_POOL_SIZE=20   (6×20=120  < 500)
-#   Sin fijar WEB_CONCURRENCY se usa os.cpus().length automáticamente.
-
+# IMPORTANTE — right-sizing del pool (lección aprendida en la 1ª corrida):
+# el cuello de botella NO es Node sino MySQL. Con 10 workers × 20 pool = 200
+# conexiones, MySQL quedaba a 800% CPU con ~200 queries corriendo a la vez
+# (thrashing) y el throughput COLAPSABA (la prueba de 500k se estancó en 141k).
+# La regla: el TOTAL de conexiones (WEB_CONCURRENCY × DB_POOL_SIZE) debe rondar
+# 3-4× los cores, no saturar. Menos workers Node dejan cores libres para MySQL.
+# Defaults balanceados que funcionan en ambas máquinas (Ryzen 12t y laptop i5 8t):
+#   6 workers × 8 pool = 48 conexiones. Se pueden subir/bajar por env si sobra CPU.
 services:
   backend:
     environment:
       LOAD_TEST_MODE: "true"
       CLUSTER_MODE: "true"
-      WEB_CONCURRENCY: "${WEB_CONCURRENCY:-}"   # vacío = auto (os.cpus().length)
-      DB_POOL_SIZE: "${DB_POOL_SIZE:-20}"
+      WEB_CONCURRENCY: "${WEB_CONCURRENCY:-6}"
+      DB_POOL_SIZE: "${DB_POOL_SIZE:-8}"
       USE_MOCK_SMS: "true"
 
   mysql:

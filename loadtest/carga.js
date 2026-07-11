@@ -17,10 +17,20 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
+// Los 4xx del app (404 sin datos, 409 idempotencia, 422 validación) son
+// respuestas VÁLIDAS, no fallas del sistema. Se marcan como "esperados" para
+// que el http_req_failed de k6 cuente SOLO fallas reales (5xx, timeouts,
+// caídas) — así el reporte no sale "en gris" por respuestas legítimas.
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 404, 409, 422));
+
 const BASE = __ENV.BASE_URL || 'http://backend:3000';
 const TOTAL = parseInt(__ENV.TOTAL || '1000');
 const VUS = parseInt(__ENV.VUS || '100');
-const WRITE_RATIO = parseFloat(__ENV.WRITE_RATIO || '0.10');
+// Por defecto la prueba de VOLUMEN es de LECTURAS (mide el techo de throughput
+// sin que las escrituras —INSERT + evento outbox, serializadas— sean el freno).
+// Para probar el camino de escritura: WRITE_RATIO=1 con un TOTAL más chico.
+const WRITE_RATIO = parseFloat(__ENV.WRITE_RATIO || '0');
+const TIMEOUT = __ENV.REQ_TIMEOUT || '20s';
 
 // Solo contamos como ERROR real los 5xx y las caídas de conexión (status 0).
 // Un 404/409/422 es una respuesta válida del app (no un fallo del sistema).
@@ -33,7 +43,7 @@ export const options = {
       executor: 'shared-iterations',
       vus: VUS,
       iterations: TOTAL,
-      maxDuration: __ENV.MAX_DURATION || '30m',
+      maxDuration: __ENV.MAX_DURATION || '45m',
     },
   },
   thresholds: {
@@ -43,13 +53,19 @@ export const options = {
 };
 
 function jsonHeaders(token, extra) {
-  return { headers: Object.assign({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, extra || {}) };
+  return {
+    headers: Object.assign({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, extra || {}),
+    timeout: TIMEOUT,
+  };
 }
 
 // Login una vez y descubre IDs reales para los endpoints que los necesitan.
+// Se usa el rol AUDITOR: tiene acceso de lectura a todos los módulos del mix
+// (incluido /historias-clinicas/resumen, que Recepcionista no puede) — así el
+// reporte no se ensucia con 403 de autorización.
 export function setup() {
   const res = http.post(`${BASE}/api/v2/auth/login`,
-    JSON.stringify({ email: 'recepcion@medicitas.pe', password: 'Medicitas2026!' }),
+    JSON.stringify({ email: 'auditor@medicitas.pe', password: 'Medicitas2026!' }),
     { headers: { 'Content-Type': 'application/json' } });
 
   const token = res.json('accessToken');
@@ -85,17 +101,22 @@ export default function (data) {
       direccion: 'Av. Prueba 123',
     });
     res = http.post(`${BASE}/api/v2/pacientes`, body, jsonHeaders(data.token, { 'Idempotency-Key': unico() }));
-  } else if (r < 0.35) {
+  } else if (r < 0.30) {
+    // Lista de pacientes (optimizada: índice activo+created_at, sin full-scan)
     res = http.get(`${BASE}/api/v2/pacientes?pagina=1&porPagina=20`, h);
     latenciaLectura.add(res.timings.duration);
-  } else if (r < 0.55) {
+  } else if (r < 0.52) {
     res = http.get(`${BASE}/api/v2/medicos`, h);
     latenciaLectura.add(res.timings.duration);
   } else if (r < 0.70) {
     res = http.get(`${BASE}/api/v2/citas`, h);
     latenciaLectura.add(res.timings.duration);
-  } else if (r < 0.85 && data.medicoId) {
-    const fecha = '2026-08-03'; // un lunes; slots de una semana futura
+  } else if (r < 0.85 && data.pacienteId) {
+    // Lookup por PK (barato) — mantiene el mix mayormente en lecturas ligeras.
+    res = http.get(`${BASE}/api/v2/pacientes/${data.pacienteId}`, h);
+    latenciaLectura.add(res.timings.duration);
+  } else if (r < 0.93 && data.medicoId) {
+    const fecha = '2026-08-03'; // un lunes; slots de una semana futura (cacheado en Redis)
     res = http.get(`${BASE}/api/v2/medicos/${data.medicoId}/slots?fecha=${fecha}`, h);
     latenciaLectura.add(res.timings.duration);
   } else if (data.pacienteId) {

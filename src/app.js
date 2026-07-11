@@ -121,6 +121,18 @@ app.use('/webhooks/twilio', twilioWebhook);
 // Ruta Swagger
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
+// Catch-all 404: cualquier ruta no montada arriba responde con el MISMO
+// envelope JSON estándar, no con el "Cannot GET ..." en HTML por defecto de
+// Express. Debe ir DESPUÉS de todas las rutas y ANTES del errorHandler.
+app.use((req, res) => {
+  res.status(404).json({
+    codigo: 'RUTA_NO_ENCONTRADA',
+    mensaje: `La ruta ${req.method} ${req.originalUrl} no existe.`,
+    correlationId: req.correlationId || null,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.use(errorHandler);
 
 module.exports = app;

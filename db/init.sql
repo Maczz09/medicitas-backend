@@ -401,7 +401,10 @@ CREATE TABLE IF NOT EXISTS pacientes (
   updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id_paciente),
   UNIQUE KEY uq_documento (tipo_documento, numero_documento),
-  INDEX idx_busqueda (nombre, apellido, numero_documento)
+  INDEX idx_busqueda (nombre, apellido, numero_documento),
+  -- Acelera el listado paginado sin búsqueda (WHERE activo ORDER BY created_at):
+  -- el índice cubre filtro + orden, evita el filesort/escaneo en cada request.
+  INDEX idx_activo_creado (activo, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS outbox (
