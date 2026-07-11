@@ -31,10 +31,21 @@ Esto activa (solo mientras uses el override):
 Ajuste por máquina (opcional):
 
 ```bash
+# Linux / Mac / Git-Bash  (sintaxis VAR=valor comando)
 # Desktop 12 vCPU
 WEB_CONCURRENCY=10 DB_POOL_SIZE=20 docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
 # Laptop i5 (~8 hilos)
 WEB_CONCURRENCY=6  DB_POOL_SIZE=20 docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+```
+
+```powershell
+# Windows PowerShell  (¡NO acepta VAR=valor en línea! usar $env:)
+# Desktop 12 vCPU
+$env:WEB_CONCURRENCY=10; $env:DB_POOL_SIZE=20; docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+# Laptop i5 (~8 hilos)
+$env:WEB_CONCURRENCY=6;  $env:DB_POOL_SIZE=20; docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+# Limpiar las variables luego (opcional):
+Remove-Item Env:WEB_CONCURRENCY, Env:DB_POOL_SIZE
 ```
 
 Regla de oro: `WEB_CONCURRENCY × DB_POOL_SIZE < 500` (max_connections de MySQL).
