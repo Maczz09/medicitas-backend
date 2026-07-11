@@ -1,0 +1,45 @@
+# Override para PRUEBAS DE CARGA. NO afecta el `docker compose up` normal.
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+#
+# Vuelta a producción (revierte todo lo de abajo):
+#   docker compose up -d
+#
+# Qué activa (todo gateado por env, prod queda intacto):
+#   - LOAD_TEST_MODE=true  → apaga el rate limiting (200/15min) del app.
+#   - CLUSTER_MODE=true     → src/cluster.js hace fork de N workers (uno por
+#                             core; WEB_CONCURRENCY para fijarlo). Los consumers
+#                             y WhatsApp corren en UN solo worker.
+#   - DB_POOL_SIZE=20       → pool de MySQL por worker (default prod: 10).
+#   - USE_MOCK_SMS=true     → notificaciones por mock, sin levantar Chromium
+#                             (libera CPU/RAM durante la carga).
+#   - MySQL max_connections=500 → headroom para (workers × DB_POOL_SIZE).
+#
+# Ajuste por máquina (opcional, por variable de entorno al levantar):
+#   Desktop 12 vCPU:  WEB_CONCURRENCY=10 DB_POOL_SIZE=20   (10×20=200 < 500)
+#   Laptop i5 (~8t):  WEB_CONCURRENCY=6  DB_POOL_SIZE=20   (6×20=120  < 500)
+#   Sin fijar WEB_CONCURRENCY se usa os.cpus().length automáticamente.
+
+services:
+  backend:
+    environment:
+      LOAD_TEST_MODE: "true"
+      CLUSTER_MODE: "true"
+      WEB_CONCURRENCY: "${WEB_CONCURRENCY:-}"   # vacío = auto (os.cpus().length)
+      DB_POOL_SIZE: "${DB_POOL_SIZE:-20}"
+      USE_MOCK_SMS: "true"
+
+  mysql:
+    # El entrypoint oficial antepone `mysqld` cuando el command empieza con `-`.
+    command: --max-connections=500
+
+  prometheus:
+    # Se repiten los flags base y se agrega el receiver de remote-write para que
+    # k6 pueda empujar sus métricas y verlas en Grafana junto a las del app.
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-remote-write-receiver'

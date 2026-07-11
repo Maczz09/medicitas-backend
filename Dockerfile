@@ -23,4 +23,7 @@ COPY src/ ./src/
 
 EXPOSE 3000
 
-CMD ["node", "src/server.js"]
+# Entrypoint de clustering: en modo normal (CLUSTER_MODE != 'true') ejecuta un
+# solo proceso igual que antes; en modo carga hace fork de N workers. Ver
+# src/cluster.js y docker-compose.loadtest.yml.
+CMD ["node", "src/cluster.js"]

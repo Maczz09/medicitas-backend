@@ -22,12 +22,23 @@ process.on('uncaughtException', (err) => {
     '[Proceso] uncaughtException — el servidor sigue activo');
 });
 
+const cluster = require('cluster');
 const app = require('./app');
 const database = require('./config/database');
 const redis = require('./config/redis');
 const rabbitmq = require('./config/rabbitmq');
 
 const PORT = process.env.PORT || 3000;
+
+// Con CLUSTERING, el HTTP corre en TODOS los workers, pero el trabajo de fondo
+// (consumers de RabbitMQ, WhatsApp, realtime SSE, recovery de farmacia) debe
+// correr en UN SOLO worker — si no, se procesarían los eventos N veces y se
+// levantarían N instancias de Chromium. Se designa al worker #1.
+// Sin cluster (producción normal o modo 1-proceso) este proceso corre el fondo.
+function deboCorrerBackground() {
+  if (process.env.CLUSTER_MODE !== 'true') return true;
+  return !!(cluster.worker && cluster.worker.id === 1);
+}
 
 async function bootstrap() {
   // El servidor HTTP arranca primero para que /metrics y /api-docs
@@ -44,6 +55,16 @@ async function bootstrap() {
     console.log('[MySQL] Conectado exitosamente');
 
     await redis.connect();
+
+    // Kill-switch sincronizado entre workers vía Redis — necesario en TODOS
+    // los workers para que un PATCH a /admin/servicios los afecte a todos.
+    await require('./shared/infrastructure/serviceSwitch').init();
+
+    // ─── Trabajo de fondo (consumers, WhatsApp, realtime, recovery) ─────────
+    // Solo el worker designado. El resto de workers sirven HTTP y ya tienen
+    // MySQL + Redis arriba, que es todo lo que el request path necesita
+    // (los eventos se escriben a la tabla outbox, no a RabbitMQ directo).
+    if (deboCorrerBackground()) {
     await rabbitmq.connect();
 
     // Setup Realtime SSE Broadcaster
@@ -208,6 +229,8 @@ async function bootstrap() {
           .catch((err) => logger.warn({ err: err.message, id: d.id }, '[Farmacia] Recovery replay: fallo individual — continúa con siguiente'));
       }
     });
+
+    } // fin if(deboCorrerBackground())
 
   } catch (err) {
     console.error('[Bootstrap] Error al conectar con la infraestructura:', err.message || err);

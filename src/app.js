@@ -40,12 +40,17 @@ function esLlamadaInterna(req) {
   return !!token && !!process.env.INTERNAL_SERVICE_TOKEN && token === process.env.INTERNAL_SERVICE_TOKEN.trim();
 }
 
+// En modo de pruebas de carga (LOAD_TEST_MODE=true) se desactiva el rate
+// limiting — de lo contrario k6 choca contra el muro de 200 req/15min en la
+// primera fracción de segundo. En producción (flag ausente) sigue idéntico.
+const esModoCarga = () => process.env.LOAD_TEST_MODE === 'true';
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX || '200'),
   standardHeaders: true,
   legacyHeaders: false,
-  skip: esLlamadaInterna,
+  skip: (req, res) => esModoCarga() || esLlamadaInterna(req, res),
   message: { error: 'Demasiadas peticiones. Intenta de nuevo más tarde.' },
 });
 
@@ -54,6 +59,7 @@ const authLimiter = rateLimit({
   max: parseInt(process.env.RATE_LIMIT_AUTH_MAX || '20'),
   standardHeaders: true,
   legacyHeaders: false,
+  skip: esModoCarga,
   message: { error: 'Demasiados intentos de autenticación. Intenta de nuevo en 15 minutos.' },
 });
 
@@ -92,17 +98,17 @@ app.get('/metrics', async (req, res) => {
 app.use('/api/', apiLimiter);
 
 app.use('/api/v2/auth', authLimiter, authRouter);
-app.use('/api/v2/pacientes', pacientesRouter);
-app.use('/api/v2/medicos', medicosRouter);
-app.use('/api/v2/citas', citasRoutes);
-app.use('/api/v2/coberturas', segurosRoutes);
+app.use('/api/v2/pacientes', killSwitch('pacientes'), pacientesRouter);
+app.use('/api/v2/medicos', killSwitch('medicos'), medicosRouter);
+app.use('/api/v2/citas', killSwitch('citas'), citasRoutes);
+app.use('/api/v2/coberturas', killSwitch('seguros'), segurosRoutes);
 app.use('/api/v2/pagos', killSwitch('pagos'), pagosRouter);
 app.use('/api/v2/admin/servicios', serviceSwitchRouter);
-app.use('/api/v2/historias-clinicas', hclRouter);
-app.use('/api/v2/prescripciones', preRouter);
-app.use('/api/v2/facturacion', facRouter);
+app.use('/api/v2/historias-clinicas', killSwitch('historias-clinicas'), hclRouter);
+app.use('/api/v2/prescripciones', killSwitch('prescripciones'), preRouter);
+app.use('/api/v2/facturacion', killSwitch('facturacion'), facRouter);
 app.use('/api/v2/auditoria', audRouter);
-app.use('/api/v2/notificaciones', notRouter);
+app.use('/api/v2/notificaciones', killSwitch('notificaciones'), notRouter);
 app.use('/api/v2/realtime', realtimeRouter);
 
 // Webhooks entrantes de servicios externos (farmacia-api, aseguradora-api) — protegidos por API Key compartida

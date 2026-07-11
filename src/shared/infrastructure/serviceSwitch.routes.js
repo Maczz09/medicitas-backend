@@ -3,9 +3,20 @@ const { verifyToken } = require('./auth.middleware');
 const { requireRole } = require('./rbac.middleware');
 const { estaHabilitado, establecer } = require('./serviceSwitch');
 
-// Módulos que se pueden simular "de baja" — lista blanca explícita para no
-// permitir apagar módulos core (auth, etc.) por error o accidente.
-const MODULOS_TOGGLEABLES = ['pagos'];
+// Módulos de negocio que se pueden simular "de baja" para las pruebas de
+// resiliencia — lista blanca explícita para no permitir apagar módulos core
+// (auth, admin, auditoría, realtime, webhooks) por error o accidente.
+const MODULOS_TOGGLEABLES = [
+  'pacientes',
+  'medicos',
+  'citas',
+  'seguros',
+  'pagos',
+  'historias-clinicas',
+  'prescripciones',
+  'facturacion',
+  'notificaciones',
+];
 
 /**
  * @swagger
@@ -33,7 +44,7 @@ router.get('/', verifyToken, requireRole('Auditor'), (req, res) => {
  *       - in: path
  *         name: nombre
  *         required: true
- *         schema: { type: string, enum: [pagos] }
+ *         schema: { type: string, enum: [pacientes, medicos, citas, seguros, pagos, historias-clinicas, prescripciones, facturacion, notificaciones] }
  *     requestBody:
  *       required: true
  *       content:
