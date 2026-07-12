@@ -178,6 +178,32 @@ contadores de negocio (citas creadas, pagos, etc.). El override habilita el
 `remote-write-receiver` de Prometheus por si luego quieres empujar las métricas
 del propio k6.
 
+### Logs y trazas del flujo (auditoría por `correlationId`)
+
+Cada petición lleva un `correlationId` que aparece en TODO lo que dispara:
+
+- **Logs (Grafana → Explore → Loki):** todas las peticiones + eventos del flujo.
+  ```logql
+  {app="medicitas-backend"} | json | correlationId=`<id>`
+  ```
+- **Trazas (Jaeger, http://localhost:16686):** buscar por el tag `correlationId`
+  (campo Tags: `correlationId=<id>`) → aparecen todos los spans/fragmentos del
+  flujo (middlewares, handler, queries MySQL, consumers).
+
+**Trazas DURANTE una prueba de carga** (muestreadas al 2%, para no saturar):
+en modo carga OTel viene apagado por defecto (máx. throughput). Para verlas:
+```powershell
+# NO apliques lean sobre Jaeger; levanta con OTel encendido:
+$env:OTEL_SDK_DISABLED="false"
+docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d
+Remove-Item Env:OTEL_SDK_DISABLED
+# ...corre la prueba; en Jaeger verás ~2% de las trazas.
+```
+> Nota: con OTel encendido el throughput baja (~1500 → ~1000 req/s) por el
+> overhead de instrumentación. Para "pasar los niveles" al máximo, déjalo apagado;
+> enciéndelo solo cuando quieras DEMOSTRAR trazas. Para el flujo completo end-to-end
+> conectado en una sola traza, ver `docs/MEJORAS.md` (propagación por el outbox).
+
 ## 5) Qué esperar (honesto)
 
 - **Nivel 1 (1k):** pasa cómodo en desktop y laptop.

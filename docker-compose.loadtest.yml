@@ -32,17 +32,25 @@ services:
       WEB_CONCURRENCY: "${WEB_CONCURRENCY:-6}"
       DB_POOL_SIZE: "${DB_POOL_SIZE:-8}"
       USE_MOCK_SMS: "true"
-      # CRÍTICO para estabilidad bajo carga: sin sampling, OpenTelemetry exporta
-      # UN trace por request (>800/s) a Jaeger (almacenamiento en memoria) y
-      # añade overhead por petición → bajo carga sostenida desbordaba WSL2 y
-      # Docker Desktop se caía ("WSL integration unexpectedly stopped"). Se
-      # apaga el tracing en modo carga. El correlationId en los logs (Loki) NO
-      # depende de OTel, así que la auditoría del flujo se mantiene intacta.
-      OTEL_SDK_DISABLED: "true"
+      # OpenTelemetry: por DEFECTO apagado en carga. Sin sampling exportaba UN
+      # trace por request (>800/s) a Jaeger (memoria) + overhead por petición →
+      # bajo carga sostenida desbordaba WSL2 y Docker Desktop se caía. Apagarlo
+      # también subió el throughput (~840 → ~1500 req/s). El correlationId de los
+      # logs (Loki) NO depende de OTel, así que la auditoría del flujo se mantiene.
+      #
+      # ¿Quieres VER trazas (muestreadas) durante una prueba de carga? Levanta con
+      #   $env:OTEL_SDK_DISABLED="false"   (PowerShell)  antes del `up`, y NO
+      # apliques lean sobre Jaeger. Con el sampler de abajo solo se exporta el 2%
+      # de las trazas → Jaeger no se satura y ves trazas de ejemplo del flujo.
+      OTEL_SDK_DISABLED: "${OTEL_SDK_DISABLED:-true}"
+      OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+      OTEL_TRACES_SAMPLER_ARG: "${OTEL_SAMPLE:-0.02}"
 
   workers:
     environment:
-      OTEL_SDK_DISABLED: "true"
+      OTEL_SDK_DISABLED: "${OTEL_SDK_DISABLED:-true}"
+      OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+      OTEL_TRACES_SAMPLER_ARG: "${OTEL_SAMPLE:-0.02}"
 
   mysql:
     # El entrypoint oficial antepone `mysqld` cuando el command empieza con `-`.
