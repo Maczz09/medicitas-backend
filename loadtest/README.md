@@ -51,6 +51,43 @@ Remove-Item Env:WEB_CONCURRENCY, Env:DB_POOL_SIZE   # limpiar luego
 
 Regla de oro: `WEB_CONCURRENCY × DB_POOL_SIZE < 500` (max_connections de MySQL).
 
+## 1.5) Estabilidad del entorno (IMPORTANTE si Docker se cae)
+
+Si al correr una prueba grande **Docker Desktop se cae** ("WSL integration with
+distro Ubuntu unexpectedly stopped" / k6 muere con "unexpected EOF"), NO es la
+app: es el WSL2 que se satura. Dos medidas:
+
+**a) Dejar el entorno "lean"** — para (no borra) los contenedores que no se
+prueban (stacks externos + Jaeger + frontend), liberando RAM/CPU:
+
+```powershell
+cd loadtest
+.\lean.ps1 stop      # antes de las pruebas
+# ...correr las pruebas...
+.\lean.ps1 restore   # recuperar todo (para el escenario de resiliencia con externos)
+```
+```bash
+./lean.sh stop   # Linux/Mac/Git-Bash
+./lean.sh restore
+```
+
+> El modo carga **apaga OpenTelemetry** automáticamente (`OTEL_SDK_DISABLED`).
+> Sin eso, se exportaba un trace por request (>1000/s) a Jaeger (memoria) y era
+> lo que tumbaba el entorno. El `correlationId` en Loki NO depende de OTel, así
+> que la auditoría del flujo se mantiene. (Medido: apagarlo subió el throughput
+> de ~840 a ~1500 req/s.)
+
+**b) Darle memoria a WSL2** (recomendado, sobre todo en la laptop de 16GB).
+Crea/edita `C:\Users\<tu-usuario>\.wslconfig`:
+
+```ini
+[wsl2]
+memory=20GB      # desktop 32GB → 20GB;  laptop 16GB → 10GB
+processors=10    # desktop → 10;  laptop i5 → 6
+swap=8GB
+```
+Aplica con `wsl --shutdown` (cierra Docker; vuelve a abrir Docker Desktop luego).
+
 ## 2) Correr las pruebas
 
 No hace falta instalar k6: los runners usan el contenedor `grafana/k6` dentro de

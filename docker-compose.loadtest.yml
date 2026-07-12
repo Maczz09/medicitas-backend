@@ -32,6 +32,17 @@ services:
       WEB_CONCURRENCY: "${WEB_CONCURRENCY:-6}"
       DB_POOL_SIZE: "${DB_POOL_SIZE:-8}"
       USE_MOCK_SMS: "true"
+      # CRÍTICO para estabilidad bajo carga: sin sampling, OpenTelemetry exporta
+      # UN trace por request (>800/s) a Jaeger (almacenamiento en memoria) y
+      # añade overhead por petición → bajo carga sostenida desbordaba WSL2 y
+      # Docker Desktop se caía ("WSL integration unexpectedly stopped"). Se
+      # apaga el tracing en modo carga. El correlationId en los logs (Loki) NO
+      # depende de OTel, así que la auditoría del flujo se mantiene intacta.
+      OTEL_SDK_DISABLED: "true"
+
+  workers:
+    environment:
+      OTEL_SDK_DISABLED: "true"
 
   mysql:
     # El entrypoint oficial antepone `mysqld` cuando el command empieza con `-`.

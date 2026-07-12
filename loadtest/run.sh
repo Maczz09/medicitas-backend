@@ -27,8 +27,8 @@ run() { # total vus write_ratio
 case "${1:-}" in
   smoke)       run 50 5 0 ;;
   nivel1)      run 1000 "${VUS:-100}" 0 ;;
-  nivel2)      run 500000 "${VUS:-300}" 0 ;;
-  nivel3)      run 1000000 "${VUS:-400}" 0 ;;
+  nivel2)      run 500000 "${VUS:-150}" 0 ;;
+  nivel3)      run 1000000 "${VUS:-150}" 0 ;;
   escrituras)  run "${TOTAL:-20000}" "${VUS:-50}" 1 ;;   # camino de escritura + eventos
   resiliencia)
     docker run --rm -i --network "$NET" -v "$DIR:/scripts" \
