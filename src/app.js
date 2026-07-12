@@ -6,6 +6,7 @@ const { swaggerUi, specs } = require('./config/swagger');
 const { correlationMiddleware } = require('./shared/infrastructure/correlation.middleware');
 const { errorHandler } = require('./shared/infrastructure/error.middleware');
 const { checkIdempotency } = require('./shared/infrastructure/api_idempotency.middleware');
+const { httpLogger } = require('./shared/infrastructure/httpLogger.middleware');
 const { metricsMiddleware } = require('./shared/infrastructure/metrics.middleware');
 const { register } = require('./config/metrics');
 
@@ -68,6 +69,7 @@ app.use(cors());
 app.use(express.json());
 app.use(metricsMiddleware);
 app.use(correlationMiddleware);
+app.use(httpLogger); // log de acceso por petición (después de correlation, para tener el correlationId)
 app.use(checkIdempotency);
 
 /**
