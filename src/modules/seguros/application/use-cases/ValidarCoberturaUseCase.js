@@ -94,6 +94,15 @@ class ValidarCoberturaUseCase {
       }, correlationId);
 
       await conn.commit();
+
+      // Métrica de negocio (Prometheus/Grafana): validaciones por estado/aseguradora.
+      try {
+        const { segurosValidadosCounter } = require('../../../../config/metrics');
+        segurosValidadosCounter.inc({
+          estado: cobertura.estaAprobada?.() ? 'aprobado' : 'rechazado',
+          aseguradora: cobertura.idAseguradora || 'desconocida',
+        });
+      } catch { /* la métrica nunca debe romper la validación */ }
     } catch (err) {
       await conn.rollback();
       logger.error({ err, correlationId }, 'Error al persistir resultado de cobertura');

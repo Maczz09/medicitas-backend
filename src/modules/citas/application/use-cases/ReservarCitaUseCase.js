@@ -108,6 +108,14 @@ class ReservarCitaUseCase {
 
       await conn.commit();
 
+      // Métrica de negocio (Prometheus/Grafana). El contador vivía en el use
+      // case viejo citas.usecases.js (código muerto) y nunca se incrementaba
+      // desde la API real → el dashboard mostraba 0. Se mueve aquí.
+      try {
+        const { citasCreadasCounter } = require('../../../../config/metrics');
+        citasCreadasCounter.inc({ especialidad: cita.especialidad || 'General' });
+      } catch { /* la métrica nunca debe romper la reserva */ }
+
       await this.disponibilidadCache.marcarOcupado(cita.idMedico, cita.fechaHora).catch(() => {});
 
     } catch (err) {

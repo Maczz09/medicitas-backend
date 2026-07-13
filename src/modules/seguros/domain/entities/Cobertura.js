@@ -22,7 +22,10 @@ class Cobertura {
   static crear({ idPaciente, idAseguradora, numeroPoliza, tipoConsulta,
                  estadoCobertura, porcentajeCobertura, codigoAutorizacion,
                  vigencia, esFallback, correlationId }) {
-    const id = `COB-${Date.now()}`;
+    // Sufijo aleatorio además del timestamp: bajo carga, dos validaciones en el
+    // mismo milisegundo generaban el MISMO COB-<ts> → Duplicate entry en la PK
+    // (500 intermitente). Mismo patrón anti-colisión que Cita (CIT-<ts>-<rand>).
+    const id = `COB-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     return new Cobertura({
       id, idPaciente, idAseguradora, numeroPoliza, tipoConsulta,
       estadoCobertura, porcentajeCobertura, codigoAutorizacion,

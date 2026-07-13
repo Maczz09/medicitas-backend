@@ -105,6 +105,28 @@ $env:VUS=80;  .\run.ps1 nivel2; Remove-Item Env:VUS
 $env:TOTAL=5000; .\run.ps1 escrituras; Remove-Item Env:TOTAL
 ```
 
+### 3.1) Cobertura TOTAL — tocar TODOS los módulos (para observabilidad)
+
+`carga.js` solo golpea unos endpoints. Para que en Jaeger/Grafana/Loki aparezcan
+los **12 servicios** (pacientes, medicos, citas, seguros, pagos, historias,
+prescripciones, facturacion, auditoria, notificaciones, admin + externos), usa
+`carga-full.js` vía estos targets:
+
+```powershell
+# MODO SWEEP: cada iteración toca UN endpoint de CADA módulo → garantiza trazas
+# de los 12 servicios. Pocas VUs, ideal para la demo de observabilidad.
+.\run.ps1 observabilidad          # 300 iters, 8 VUs, 30% escrituras
+
+# MODO MIX: mezcla ponderada, mide throughput tocando todos los módulos.
+.\run.ps1 full                    # 5000 iters, 40 VUs, 15% escrituras
+$env:TOTAL=20000; $env:VUS=50; .\run.ps1 full; Remove-Item Env:TOTAL,Env:VUS
+```
+
+La **cascada de escritura** (paciente → validar cobertura → cita → pago) genera
+UNA traza que cruza pacientes → seguros → citas → pagos → **facturación
+(comprobante+PDF)** → **notificaciones (SMS)** → auditoría. El resumen de k6
+imprime `cascadas_completas` = cuántas cadenas full-stack se completaron.
+
 ---
 
 ## 4) Resiliencia — dar de baja un servicio
@@ -141,6 +163,35 @@ docker start medicitas_rabbitmq   # al volver, el worker de outbox los drena
 
 Módulos bajables por kill-switch: `pacientes, medicos, citas, seguros, pagos,
 historias-clinicas, prescripciones, facturacion, notificaciones`.
+
+### 4.1) Resiliencia servicio-por-servicio (un comando por servicio)
+
+Script dedicado con UN comando para bajar/recuperar CADA pieza. **Nunca toca
+Jaeger** (para no perder trazas durante la prueba).
+
+```powershell
+.\resiliencia-servicios.ps1 estado                  # ver qué módulos están arriba
+
+# --- MÓDULOS de negocio (kill-switch, 503 pero el resto sigue) ---
+.\resiliencia-servicios.ps1 baja citas              # bajar UNO
+.\resiliencia-servicios.ps1 sube citas              # recuperarlo
+.\resiliencia-servicios.ps1 baja-todos              # bajar los 9, uno por uno
+.\resiliencia-servicios.ps1 sube-todos              # recuperar los 9
+
+# --- INFRA (docker stop; demuestra reintentos / circuit breaker / outbox) ---
+.\resiliencia-servicios.ps1 infra-baja rabbitmq     # eventos se acumulan en outbox
+.\resiliencia-servicios.ps1 infra-sube rabbitmq     # el worker los drena al volver
+.\resiliencia-servicios.ps1 infra-baja farmacia     # abre circuit breaker → receta contingencia
+.\resiliencia-servicios.ps1 infra-sube farmacia
+```
+
+Infra bajable: `mysql, redis, rabbitmq, nginx, workers, farmacia, aseguradora,
+seguros-fallback`. (En Git Bash: `bash resiliencia-servicios.sh <accion> <servicio>`.)
+
+**Demostración típica para el profe:** en una terminal corre `.\run.ps1 full`
+(carga sostenida tocando todo); en otra, baja un servicio y muestra que el
+resto sigue verde en Grafana y que las trazas del módulo caído desaparecen en
+Jaeger. Luego recupéralo y muestra que vuelve.
 
 ---
 
@@ -182,6 +233,50 @@ login) antes de esperar verlo en el dropdown.
 
 ---
 
+## 5.1) Observabilidad al 100% — los 3 pilares en tiempo real
+
+Setup recomendado para la demo (carga SIN rate-limit + trazas visibles, Jaeger
+vivo). Todo en una línea:
+```powershell
+$env:OTEL_SDK_DISABLED="false"; docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d; Remove-Item Env:OTEL_SDK_DISABLED
+```
+Luego deja corriendo carga que toca todo: `.\run.ps1 full` o `.\run.ps1 observabilidad`.
+
+### A) TRAZAS — Jaeger (http://localhost:16686)
+- **Service** = `medicitas-backend`, **Operation** = `POST /api/v2/pagos` → **Find Traces**.
+- Abre una traza de pago: verás **una sola cascada** que cruza pagos → factura
+  (comprobante) → notificaciones (SMS) → auditoría, unida por el `traceparent`
+  propagado por el outbox. Es la trazabilidad end-to-end.
+- También aparecen `aseguradora-api` y `farmacia-api` (servicios externos) en las
+  cascadas de cobertura y prescripción.
+- Buscar TODO un flujo: pon en **Tags** `correlationId=<id>` (el id sale en la
+  respuesta JSON de cualquier POST).
+
+### B) MÉTRICAS — Grafana (http://localhost:3001) / Prometheus (http://localhost:9090)
+- Grafana ya está provisionado: RPS, latencia p95/p99, errores y **contadores de
+  negocio**: citas creadas, pagos, comprobantes, SMS, coberturas, encuentros.
+- Prometheus scrapea `backend:9091` (NO 3000). En modo cluster el proceso primary
+  **agrega** las métricas de los N workers ahí — si scrapeara 3000 vería solo un
+  worker al azar y los contadores saldrían en 0. Ver `src/config/metricsServer.js`.
+- Consulta rápida (PromQL en Prometheus): `sum(medicitas_pagos_completados_total)`,
+  `sum(rate(http_requests_total[1m]))` (RPS), `histogram_quantile(0.95,
+  sum(rate(http_request_duration_seconds_bucket[5m])) by (le))` (p95).
+
+### C) LOGS — Loki (en Grafana → Explore → datasource Loki)
+- Todas las peticiones + eventos, correlacionables:
+  ```logql
+  {app="medicitas-backend"} | json | correlationId=`<id>`
+  ```
+- Un correlationId te da la petición HTTP + los eventos del outbox + el
+  procesamiento en los consumers, a través de todos los servicios.
+
+> **Nota honesta de rendimiento:** con OTel encendido el throughput baja ~30%
+> (medido en el desktop 5600X: ~356 req/s con OTel vs ~500+ sin él). Para
+> "pasar los niveles" al máximo, corre sin OTel; para DEMOSTRAR observabilidad,
+> enciéndelo. Ambos escenarios dan 0% de errores 5xx.
+
+---
+
 ## 6) Volver a la normalidad
 
 ```powershell
@@ -195,8 +290,14 @@ docker compose up -d   # revierte el override: 1 proceso, rate-limit, pool 10
 
 ## Flujo típico recomendado
 
+**Para medir throughput (techo de req/s):**
 ```
-smoke → nivel1 → nivel2 → nivel3 → escrituras → resiliencia
+smoke → nivel1 → nivel2 → nivel3 → escrituras
+```
+**Para la demo de observabilidad/trazabilidad (profe):**
+```
+levantar con OTEL_SDK_DISABLED=false  →  .\run.ps1 full (o observabilidad)
+→  ver Jaeger + Grafana + Loki  →  resiliencia-servicios (bajar/subir servicios)
 ```
 Desktop con defaults; laptop con lean + `$env:VUS=80` en los niveles altos.
 

@@ -116,6 +116,14 @@ class ConfirmarPagoUseCase {
       }, correlationId);
 
       await conn.commit();
+
+      // Métricas de negocio (Prometheus/Grafana): nº de pagos y monto total por
+      // método. Vivían en el use case viejo pagos.usecases.js (no cableado).
+      try {
+        const { pagosCompletadosCounter, pagosMontoTotal } = require('../../../../config/metrics');
+        pagosCompletadosCounter.inc({ metodo_pago: metodoPago });
+        pagosMontoTotal.inc({ metodo_pago: metodoPago }, Number(montoTotal) || 0);
+      } catch { /* la métrica nunca debe romper el pago */ }
     } catch (err) {
       await conn.rollback();
       if (err.code && err.httpStatus) throw err;

@@ -30,6 +30,24 @@ const rabbitmq = require('./config/rabbitmq');
 
 const PORT = process.env.PORT || 3000;
 
+// Métricas en :9091 para Prometheus. Dos casos:
+//   - Modo NORMAL (proceso único): se arranca el servidor local aquí.
+//   - Modo CLUSTER: el PRIMARY expone el servidor AGREGADO (ver cluster.js); cada
+//     WORKER solo registra su listener IPC para responderle con sus métricas.
+if (process.env.CLUSTER_MODE !== 'true') {
+  try {
+    require('./config/metricsServer').startLocal();
+  } catch (err) {
+    console.error('[Servidor] No se pudo iniciar el servidor de métricas local:', err.message);
+  }
+} else if (cluster.isWorker) {
+  try {
+    require('./config/metricsServer').registerWorker();
+  } catch (err) {
+    console.error('[Servidor] No se pudo registrar el worker para métricas:', err.message);
+  }
+}
+
 // Con CLUSTERING, el HTTP corre en TODOS los workers, pero el trabajo de fondo
 // (consumers de RabbitMQ, WhatsApp, realtime SSE, recovery de farmacia) debe
 // correr en UN SOLO worker — si no, se procesarían los eventos N veces y se

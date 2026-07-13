@@ -159,6 +159,15 @@ class NotificarPacienteUseCase {
       await this.eventPublisher.publish(conn, eventoPublicar, payloadEvento, correlationId);
 
       await conn.commit();
+
+      // Métrica de negocio (Prometheus/Grafana): SMS/WhatsApp efectivamente
+      // enviados (estado ENVIADO). No se contaba desde el consumer real.
+      try {
+        if (mensajeSMS.estado === 'ENVIADO') {
+          const { smsEnviadosCounter } = require('../../../../config/metrics');
+          smsEnviadosCounter.inc();
+        }
+      } catch { /* la métrica nunca debe romper la notificación */ }
     } catch (txErr) {
       await conn.rollback();
       // Si la TX falla pero el SMS ya fue enviado (estado ENVIADO),

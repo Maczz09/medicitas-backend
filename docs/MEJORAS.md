@@ -115,6 +115,47 @@ se limita por `sub`/`idUsuario` del JWT (sin verificar firma, solo para keying;
 auth valida aparte); sin token cae a la IP normalizada. Pendiente opcional:
 límites diferenciados por ruta sensible (login más estricto, etc.).
 
+## Bugs encontrados y corregidos en las pruebas de carga total (2026-07-13)
+
+Al construir la prueba de cobertura total (`loadtest/carga-full.js`, toca los 12
+módulos) bajo carga real, aparecieron 4 fallos que en las pruebas parciales no se
+veían — todos corregidos:
+
+### A. Colisión de ID de cobertura bajo concurrencia ✅
+`Cobertura.crear()` usaba `id = COB-${Date.now()}`. Con varias validaciones en el
+mismo milisegundo → `Duplicate entry` en la PK → 500 intermitente en
+`/coberturas/validar` (y rompía la cascada de pago). Fix: sufijo aleatorio
+(`COB-<ts>-<rand>`), mismo patrón anti-colisión que `Cita`.
+
+### B. `GET /notificaciones/sms/paciente/:id` → 500 ✅
+`MensajesSMSMySQLRepository.findByIdPaciente` usaba `LIMIT ? OFFSET ?` con
+`execute()` (prepared statements) → `ER_WRONG_ARGUMENTS` de mysql2 (bug conocido
+del protocolo binario). Fix: validar enteros e interpolar `LIMIT ${n}` directo
+(mismo patrón que el `GET /` del mismo módulo). Además ahora loguea el error real
+antes de envolverlo.
+
+### C. Métricas fragmentadas en modo cluster ✅ (observabilidad)
+Con `CLUSTER_MODE=true` cada worker tenía su propio registro prom-client y
+Prometheus scrapeaba `backend:3000` → un worker al azar → los contadores salían
+en 0 o subcontados bajo carga. Fix: `src/config/metricsServer.js` — el proceso
+primary expone un endpoint AGREGADO en `:9091` que combina (vía IPC,
+`AggregatorRegistry` con `setRegistries` apuntando al registro custom) las
+métricas de los N workers. `monitoring/prometheus.yml` ahora scrapea `:9091`.
+
+### D. Contadores de negocio nunca se incrementaban ✅ (observabilidad)
+`citasCreadasCounter`, `pagosCompletadosCounter`, `comprobantesEmitidosCounter`,
+`smsEnviadosCounter`, `segurosValidadosCounter`, `encuentrosHclCounter` vivían en
+los use cases VIEJOS (`*.usecases.js`, código muerto no cableado). Los use cases
+hexagonales ACTIVOS (`ReservarCitaUseCase`, `ConfirmarPagoUseCase`,
+`GenerarComprobanteUseCase`, `NotificarPacienteUseCase`, `ValidarCoberturaUseCase`,
+`RegistrarConsultaUseCase`) no los tocaban → dashboards de negocio en 0. Fix:
+`.inc()` movido a cada use case activo tras el commit. Verificado end-to-end: 1
+cascada = +1 cita, +1 pago, +1 comprobante, +1 SMS (números consistentes).
+
+> Resultado tras los fixes: `carga-full.js` con 40k requests, 15-20 VUs, 70%
+> escrituras → **0% errores 5xx**, cascadas completas, y los 12 servicios con
+> trazas (Jaeger), métricas (Grafana) y logs (Loki). Ver `loadtest/COMANDOS.md`.
+
 ## Ya hecho en sesiones anteriores (no repetir)
 - Right-size del pool + índice `(activo, created_at)` + query de pacientes sin
   `SQL_CALC_FOUND_ROWS` → el 1M pasa al 100%.

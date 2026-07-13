@@ -24,17 +24,26 @@ run() { # total vus write_ratio
     grafana/k6 run "/scripts/carga.js"
 }
 
+run_full() { # total vus write_ratio mode — cobertura total (todos los módulos)
+  docker run --rm -i --network "$NET" \
+    -v "$DIR:/scripts" \
+    -e BASE_URL="$BASE_URL" -e TOTAL="$1" -e VUS="$2" -e WRITE_RATIO="${WRITE_RATIO:-$3}" -e MODE="${MODE:-$4}" \
+    grafana/k6 run "/scripts/carga-full.js"
+}
+
 case "${1:-}" in
   smoke)       run 50 5 0 ;;
   nivel1)      run 1000 "${VUS:-100}" 0 ;;
   nivel2)      run 500000 "${VUS:-150}" 0 ;;
   nivel3)      run 1000000 "${VUS:-150}" 0 ;;
   escrituras)  run "${TOTAL:-20000}" "${VUS:-50}" 1 ;;   # camino de escritura + eventos
+  full)          run_full "${TOTAL:-5000}" "${VUS:-40}" 0.15 mix ;;    # todos los módulos (throughput)
+  observabilidad) run_full "${TOTAL:-300}" "${VUS:-8}" 0.30 sweep ;;   # sweep: 12 servicios por iteración
   resiliencia)
     docker run --rm -i --network "$NET" -v "$DIR:/scripts" \
       -e BASE_URL="$BASE_URL" -e RATE="${RATE:-100}" -e DURATION="${DURATION:-2m}" \
       -e CONTROL_PATH="${CONTROL_PATH:-/api/v2/medicos}" -e TARGET_PATH="${TARGET_PATH:-/api/v2/citas}" \
       grafana/k6 run /scripts/resiliencia.js ;;
   *)
-    echo "Uso: $0 {smoke|nivel1|nivel2|nivel3|escrituras|resiliencia}" >&2; exit 1 ;;
+    echo "Uso: $0 {smoke|nivel1|nivel2|nivel3|escrituras|full|observabilidad|resiliencia}" >&2; exit 1 ;;
 esac

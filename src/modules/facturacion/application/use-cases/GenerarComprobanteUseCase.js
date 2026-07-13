@@ -117,6 +117,13 @@ class GenerarComprobanteUseCase {
 
       await conn2.commit();
 
+      // Métrica de negocio (Prometheus/Grafana): comprobantes emitidos. Vivía en
+      // el use case viejo fac.usecases.js (no cableado al consumer real).
+      try {
+        const { comprobantesEmitidosCounter } = require('../../../../config/metrics');
+        comprobantesEmitidosCounter.inc();
+      } catch { /* la métrica nunca debe romper la emisión */ }
+
       logger.info(
         { idComprobante: comprobante.id, numero: comprobante.numero, idPago },
         'Comprobante emitido correctamente'

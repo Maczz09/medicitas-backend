@@ -28,6 +28,15 @@ if (process.env.CLUSTER_MODE !== 'true') {
     cluster.fork();
   }
 
+  // Servidor de métricas AGREGADO: el primary combina (vía IPC) las métricas de
+  // los N workers para que Prometheus vea la suma real y no un solo worker.
+  // Ver src/config/metricsServer.js.
+  try {
+    require('./config/metricsServer').startAggregated();
+  } catch (err) {
+    console.error('[Cluster] No se pudo iniciar el servidor de métricas agregado:', err.message);
+  }
+
   // Reiniciar workers que se caigan (para no perder capacidad durante la
   // prueba), salvo que estemos en apagado ordenado — si no, `docker stop`
   // dispararía un bucle de reinicio y el contenedor no pararía.

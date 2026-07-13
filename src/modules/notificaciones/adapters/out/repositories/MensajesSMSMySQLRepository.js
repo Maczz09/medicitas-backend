@@ -55,7 +55,13 @@ class MensajesSMSMySQLRepository {
   async findByIdPaciente(idPaciente, { pagina = 1, porPagina = 20 } = {}) {
     const conn = await this.pool.getConnection();
     try {
-      const offset = (pagina - 1) * porPagina;
+      // mysql2 execute() (prepared statements) rechaza `LIMIT ?`/`OFFSET ?` con
+      // ER_WRONG_ARGUMENTS aunque el valor JS ya sea entero (limitación del
+      // protocolo binario). Se validan como enteros y se interpolan directo —
+      // mismo patrón que el GET / de notificaciones.routes.js. Sin riesgo de
+      // inyección: son números saneados, no strings del cliente.
+      const limit = Math.min(Math.max(parseInt(porPagina, 10) || 20, 1), 100);
+      const offset = Math.max((Math.max(parseInt(pagina, 10) || 1, 1) - 1) * limit, 0);
       const [rows] = await conn.execute(
         `SELECT id_mensaje, id_evento_origen, tipo_evento, id_paciente,
                 telefono_destino, contenido, estado, referencia_gateway,
@@ -63,11 +69,16 @@ class MensajesSMSMySQLRepository {
          FROM svc_not.mensajes_sms
          WHERE id_paciente = ?
          ORDER BY created_at DESC
-         LIMIT ? OFFSET ?`,
-        [idPaciente, porPagina, offset]
+         LIMIT ${limit} OFFSET ${offset}`,
+        [idPaciente]
       );
       return rows.map(this._mapear);
     } catch (err) {
+      // Loguear el error real ANTES de envolverlo — si no, un fallo de BD se
+      // vuelve irreproducible desde los logs (patrón del proyecto).
+      const logger = require('../../../../../shared/logger/logger');
+      logger.error({ err: err.message, code: err.code, sqlMessage: err.sqlMessage, idPaciente },
+        '[MensajesSMSRepo] Error al listar SMS del paciente');
       throw new DomainError('ERROR_INTERNO_NOT', 500, 'Error al listar SMS del paciente');
     } finally {
       conn.release();

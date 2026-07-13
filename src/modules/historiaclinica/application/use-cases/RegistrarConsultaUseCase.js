@@ -115,6 +115,12 @@ class RegistrarConsultaUseCase {
 
       await conn.commit();
 
+      // Métrica de negocio (Prometheus/Grafana): encuentros clínicos registrados.
+      try {
+        const { encuentrosHclCounter } = require('../../../../config/metrics');
+        encuentrosHclCounter.inc();
+      } catch { /* la métrica nunca debe romper el registro */ }
+
       // Best-effort: mover la cita a Completada. El encuentro ya está guardado.
       this.citaValidator.completarCita(dto.idCita).catch((err) => {
         console.warn(`[HCL] No se pudo completar cita ${dto.idCita}: ${err.message}`);
