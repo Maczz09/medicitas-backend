@@ -15,6 +15,30 @@ class RecetasContingenciaMySQLRepository {
     return this._mapToDTO(rows[0]);
   }
 
+  // Para la ruta de descarga, que regenera el PDF al vuelo (ya no se lee de
+  // disco): además de la receta trae los datos que el PDF imprime pero que no
+  // se persisten en recetas_contingencia — nombre del paciente, encuentro
+  // clínico y referencia de farmacia (viven en svc_pac.pacientes y despachos).
+  async findParaPdf(id, db) {
+    const [rows] = await db.query(
+      `SELECT rc.*,
+              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
+              d.id_encuentro_clinico, d.referencia_farmacia
+       FROM svc_pre.recetas_contingencia rc
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = rc.id_paciente
+       LEFT JOIN svc_pre.despachos d ON d.id = rc.id_despacho
+       WHERE rc.id = ?`,
+      [id]
+    );
+    if (rows.length === 0) return null;
+    return {
+      ...this._mapToDTO(rows[0]),
+      nombrePaciente:     rows[0].paciente_nombre,
+      idEncuentroClinico: rows[0].id_encuentro_clinico,
+      referenciaFarmacia: rows[0].referencia_farmacia,
+    };
+  }
+
   async save(receta, conn) {
     const query = `
       INSERT INTO svc_pre.recetas_contingencia (

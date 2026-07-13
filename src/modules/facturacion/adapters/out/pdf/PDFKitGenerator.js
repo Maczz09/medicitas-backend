@@ -1,41 +1,40 @@
 const PDFDocument = require('pdfkit');
-const fs          = require('fs');
-const path        = require('path');
 const { DomainError } = require('../../../../../shared/domain/errors');
 
-const STORAGE_PATH = process.env.STORAGE_PATH || './storage/comprobantes';
 const APP_BASE_URL = process.env.APP_BASE_URL  || 'http://localhost';
 
+// Genera el comprobante en PDF SIN tocar disco (regla del proyecto: todo en
+// memoria para no crear cuellos de I/O bajo concurrencia). La ruta de descarga
+// REGENERA el PDF al vuelo desde el registro de la BD; no se persiste el archivo.
 class PDFKitGenerator {
-  async generar(comprobante) {
-    // Asegurar que el directorio existe
-    if (!fs.existsSync(STORAGE_PATH)) {
-      fs.mkdirSync(STORAGE_PATH, { recursive: true });
-    }
+  urlDescarga(comprobante) {
+    return `${APP_BASE_URL}/api/v2/facturacion/comprobantes/${comprobante.id}/pdf`;
+  }
 
-    const nombreArchivo = `${comprobante.numero}.pdf`;
-    const rutaPdf       = path.join(STORAGE_PATH, nombreArchivo);
-    const urlDescarga   = `${APP_BASE_URL}/api/v2/facturacion/comprobantes/${comprobante.id}/pdf`;
-
+  // Devuelve el PDF como Buffer en memoria (para la descarga y el envío por WhatsApp).
+  async generarBuffer(comprobante) {
     try {
-      await this._generarPDF(comprobante, rutaPdf);
-      return { rutaPdf, urlDescarga };
+      return await this._construirBuffer(comprobante);
     } catch (err) {
-      // Limpiar archivo parcial si existe
-      if (fs.existsSync(rutaPdf)) {
-        fs.unlinkSync(rutaPdf);
-      }
       throw new DomainError('ERROR_GENERACION_PDF', 500,
         `No se pudo generar el PDF: ${err.message}`);
     }
   }
 
-  _generarPDF(comprobante, rutaPdf) {
-    return new Promise((resolve, reject) => {
-      const doc    = new PDFDocument({ size: 'A5', margin: 40 });
-      const stream = fs.createWriteStream(rutaPdf);
+  // En la emisión: valida que el PDF se puede generar (descarta el buffer) y
+  // devuelve solo la URL de descarga. No escribe nada a disco.
+  async generar(comprobante) {
+    await this.generarBuffer(comprobante); // valida temprano; si falla, marca ERROR
+    return { urlDescarga: this.urlDescarga(comprobante) };
+  }
 
-      doc.pipe(stream);
+  _construirBuffer(comprobante) {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: 'A5', margin: 40 });
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
 
       // ── Encabezado ────────────────────────────────────────────────────────────
       doc.fontSize(18).font('Helvetica-Bold')
@@ -53,8 +52,11 @@ class PDFKitGenerator {
          .text(comprobante.tipo, { align: 'center' });
       doc.fontSize(12).font('Helvetica')
          .text(`Nro: ${comprobante.numero}`, { align: 'center' });
+      // En la descarga el PDF se regenera al vuelo: se usa la fecha de emisión
+      // persistida (created_at) para que el documento no cambie entre descargas.
+      const fechaEmision = comprobante.fechaEmision ? new Date(comprobante.fechaEmision) : new Date();
       doc.fontSize(10)
-         .text(`Fecha: ${new Date().toLocaleDateString('es-PE', {
+         .text(`Fecha: ${fechaEmision.toLocaleDateString('es-PE', {
            day: '2-digit', month: '2-digit', year: 'numeric',
          })}`, { align: 'center' });
       doc.moveDown(0.8);
@@ -105,9 +107,6 @@ class PDFKitGenerator {
          .text('Este comprobante es válido como constancia de pago.', { align: 'center' });
 
       doc.end();
-
-      stream.on('finish', resolve);
-      stream.on('error',  reject);
     });
   }
 }

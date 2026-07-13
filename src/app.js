@@ -46,11 +46,32 @@ function esLlamadaInterna(req) {
 // primera fracción de segundo. En producción (flag ausente) sigue idéntico.
 const esModoCarga = () => process.env.LOAD_TEST_MODE === 'true';
 
+// Clave del rate limit POR USUARIO cuando hay token (no solo por IP): detrás de
+// un NAT/proxy muchos usuarios comparten IP y se penalizarían entre sí. Se lee el
+// `sub` del JWT sin verificar la firma (solo para keying; auth ya valida el token
+// aparte). Sin token válido, cae a la IP. `req.ip` se normaliza para IPv6.
+const { ipKeyGenerator } = rateLimit;
+function claveRateLimit(req, res) {
+  const token = req.headers.authorization?.replace('Bearer ', '').trim();
+  if (token) {
+    try {
+      const parte = token.split('.')[1];
+      if (parte) {
+        const payload = JSON.parse(Buffer.from(parte, 'base64url').toString('utf8'));
+        const uid = payload.sub || payload.idUsuario;
+        if (uid) return `u:${uid}`;
+      }
+    } catch { /* token ilegible → cae a IP */ }
+  }
+  return ipKeyGenerator ? ipKeyGenerator(req, res) : req.ip;
+}
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX || '200'),
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: claveRateLimit,
   skip: (req, res) => esModoCarga() || esLlamadaInterna(req, res),
   message: { error: 'Demasiadas peticiones. Intenta de nuevo más tarde.' },
 });
@@ -84,8 +105,42 @@ app.use(checkIdempotency);
  *       200:
  *         description: El servicio está operando correctamente
  */
-// Endpoint de salud (Heartbeat) para Docker Healthcheck
+// Liveness (Heartbeat) para Docker Healthcheck — SOLO comprueba que el proceso
+// responde. NO verifica dependencias a propósito: si MySQL/Redis se caen,
+// reiniciar el backend no los arregla; el liveness solo detecta un proceso muerto.
 app.get('/health', (req, res) => res.status(200).json({ status: 'OK', timestamp: new Date() }));
+
+// Readiness PROFUNDO — verifica las dependencias reales (MySQL, Redis, RabbitMQ)
+// y devuelve 503 si alguna está caída. Para monitoreo/balanceadores: sirve para
+// dejar de enrutar tráfico a una instancia que no puede atender aunque el proceso
+// siga vivo. Antes solo existía /health devolviendo "OK" sin comprobar nada.
+app.get('/health/ready', async (req, res) => {
+  const database = require('./config/database');
+  const redis = require('./config/redis');
+  const rabbitmq = require('./config/rabbitmq');
+
+  const checks = {};
+  let ok = true;
+
+  try { await database.query('SELECT 1'); checks.mysql = 'up'; }
+  catch { checks.mysql = 'down'; ok = false; }
+
+  try {
+    if (redis.client.isOpen) { await redis.client.ping(); checks.redis = 'up'; }
+    else { checks.redis = 'down'; ok = false; }
+  } catch { checks.redis = 'down'; ok = false; }
+
+  try {
+    checks.rabbitmq = rabbitmq.getChannel() ? 'up' : 'down';
+    if (checks.rabbitmq === 'down') ok = false;
+  } catch { checks.rabbitmq = 'down'; ok = false; }
+
+  res.status(ok ? 200 : 503).json({
+    status: ok ? 'READY' : 'NOT_READY',
+    checks,
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Endpoint de métricas para Prometheus (solo accesible internamente)
 app.get('/metrics', async (req, res) => {

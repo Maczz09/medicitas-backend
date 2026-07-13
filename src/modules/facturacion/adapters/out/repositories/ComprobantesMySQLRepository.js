@@ -111,6 +111,7 @@ class ComprobantesMySQLRepository {
       errorMensaje:         r.error_mensaje,
       intentosGeneracion:   r.intentos_generacion,
       correlationId:        r.correlation_id,
+      fechaEmision:         r.created_at,
     });
   }
 }

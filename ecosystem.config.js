@@ -21,6 +21,13 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       watch: false
+    },
+    {
+      name: 'worker-limpieza-idempotencia',
+      script: './workers/limpieza_idempotencia.cron.js',
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false
     }
   ]
 };

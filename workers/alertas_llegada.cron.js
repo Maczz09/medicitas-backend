@@ -31,7 +31,7 @@ async function publicarEvento(conn, tipoEvento, idCita, payload) {
   const correlationId = crypto.randomUUID(); // Simplificado para cron
   
   await conn.execute(
-    `INSERT INTO svc_cit.outbox (id, evento, payload, correlation_id)
+    `INSERT INTO svc_cit.outbox (id_evento, tipo_evento, payload, correlation_id)
      VALUES (?, ?, ?, ?)`,
     [idEvento, tipoEvento, JSON.stringify(payload), correlationId]
   );

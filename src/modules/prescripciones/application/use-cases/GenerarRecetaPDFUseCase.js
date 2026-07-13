@@ -47,7 +47,11 @@ class GenerarRecetaPDFUseCase {
     }
 
     const id = `RCT-${Date.now().toString(36).toUpperCase()}`;
-    const { rutaPdf, urlDescarga } = await this.pdfGenerator.generar({
+    // El PDF ya NO se escribe a disco: se valida que se puede generar (en
+    // memoria) y se guarda solo la urlDescarga. La ruta de descarga regenera
+    // el PDF al vuelo desde el registro. rutaPdf queda null (columna
+    // conservada por compatibilidad histórica).
+    const { urlDescarga } = await this.pdfGenerator.generar({
       id,
       idPaciente:         despacho.idPaciente,
       // El paciente/PDF no comparten ID con la cola de farmacia (que agrupa
@@ -70,7 +74,7 @@ class GenerarRecetaPDFUseCase {
       medicamento:  contenido?.medicamento,
       dosis:        contenido?.dosis,
       cantidad:     contenido?.cantidad,
-      rutaPdf,
+      rutaPdf: null,
       urlDescarga,
       correlationId,
     };

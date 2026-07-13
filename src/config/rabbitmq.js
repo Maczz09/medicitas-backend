@@ -102,7 +102,12 @@ async function publishEvent(tipoEvento, payload, correlationId, idEvento, origen
     parsedPayload = {};
   }
 
-  const { _actor, _timestamp, ...cleanPayload } = parsedPayload;
+  // _actor/_timestamp suben al sobre del mensaje; _traceparent/_tracestate van
+  // como headers AMQP estándar W3C para que los consumers (con OTel activo)
+  // unan sus spans a la traza del request HTTP original — una sola cascada en
+  // Jaeger. Se copian LITERALES (sin la API de OTel a propósito: este worker
+  // corre sin SDK y ahí inject/extract serían no-ops). Ver traceContext.js.
+  const { _actor, _timestamp, _traceparent, _tracestate, ...cleanPayload } = parsedPayload;
 
   const sobre = {
     evento:        tipoEvento,
@@ -115,11 +120,16 @@ async function publishEvent(tipoEvento, payload, correlationId, idEvento, origen
   };
   const message = Buffer.from(JSON.stringify(sobre));
 
+  const headers = {};
+  if (_traceparent) headers.traceparent = _traceparent;
+  if (_tracestate)  headers.tracestate  = _tracestate;
+
   channel.publish('medicitas.events', routingKey, message, {
     persistent: true,
     messageId: id,
     correlationId: correlationId,
-    contentType: 'application/json'
+    contentType: 'application/json',
+    headers,
   });
 }
 

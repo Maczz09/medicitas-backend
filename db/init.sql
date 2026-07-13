@@ -106,7 +106,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   publicado_en  TIMESTAMP    NULL,
   error_msg     TEXT,
-  PRIMARY KEY (id_evento)
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ═══════════════════════════════════════════════════════════
@@ -142,15 +143,17 @@ CREATE TABLE IF NOT EXISTS citas (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS outbox (
-  id              VARCHAR(36)  NOT NULL,
-  evento          VARCHAR(60)  NOT NULL,
-  payload         JSON         NOT NULL,
-  correlation_id  VARCHAR(36)  NULL,
-  publicado       TINYINT(1)   NOT NULL DEFAULT 0,
-  intentos        INT          NOT NULL DEFAULT 0,
-  created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  INDEX idx_publicado (publicado, created_at)
+  id_evento     VARCHAR(36)  NOT NULL,
+  tipo_evento   VARCHAR(100) NOT NULL,
+  payload       JSON         NOT NULL,
+  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  intentos      INT          NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(36) NULL,
+  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  publicado_en  TIMESTAMP    NULL,
+  error_msg     TEXT,
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS eventos_procesados (
@@ -221,7 +224,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   creado_en     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   publicado_en  TIMESTAMP     NULL,
   error_msg     TEXT,
-  PRIMARY KEY (id_evento)
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS eventos_procesados (
@@ -265,15 +269,17 @@ CREATE TABLE IF NOT EXISTS validaciones_cobertura (
 -- seguros inserta (id, evento, payload, correlation_id), no
 -- (id_evento, tipo_evento, estado) — la BD viva ya tenía la forma correcta.
 CREATE TABLE IF NOT EXISTS outbox (
-  id             VARCHAR(36)  NOT NULL,
-  evento         VARCHAR(60)  NOT NULL,
-  payload        JSON         NOT NULL,
-  correlation_id VARCHAR(36)  NULL,
-  publicado      TINYINT(1)   NOT NULL DEFAULT 0,
-  intentos       INT          NOT NULL DEFAULT 0,
-  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_publicado (publicado, created_at)
+  id_evento     VARCHAR(36)  NOT NULL,
+  tipo_evento   VARCHAR(100) NOT NULL,
+  payload       JSON         NOT NULL,
+  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  intentos      INT          NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(36) NULL,
+  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  publicado_en  TIMESTAMP    NULL,
+  error_msg     TEXT,
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ═══════════════════════════════════════════════════════════
@@ -309,7 +315,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   publicado_en  TIMESTAMP    NULL,
   error_msg     TEXT,
-  PRIMARY KEY (id_evento)
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS eventos_procesados (
@@ -366,15 +373,17 @@ CREATE TABLE IF NOT EXISTS series_comprobante (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS outbox (
-  id             VARCHAR(36)  NOT NULL,
-  evento         VARCHAR(60)  NOT NULL,
-  payload        JSON         NOT NULL,
-  correlation_id VARCHAR(36),
-  publicado      TINYINT(1)   NOT NULL DEFAULT 0,
-  intentos       INT          NOT NULL DEFAULT 0,
-  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_publicado (publicado, created_at)
+  id_evento     VARCHAR(36)  NOT NULL,
+  tipo_evento   VARCHAR(100) NOT NULL,
+  payload       JSON         NOT NULL,
+  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  intentos      INT          NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(36) NULL,
+  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  publicado_en  TIMESTAMP    NULL,
+  error_msg     TEXT,
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO svc_fac.series_comprobante (tipo, ultimo) VALUES ('BOLETA', 0), ('FACTURA', 0) ON DUPLICATE KEY UPDATE ultimo=ultimo;
@@ -417,7 +426,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   publicado_en  TIMESTAMP    NULL,
   error_msg     TEXT,
-  PRIMARY KEY (id_evento)
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ═══════════════════════════════════════════════════════════
@@ -470,7 +480,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   publicado_en  TIMESTAMP    NULL,
   error_msg     TEXT,
-  PRIMARY KEY (id_evento)
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ═══════════════════════════════════════════════════════════
@@ -532,19 +543,18 @@ CREATE TABLE IF NOT EXISTS bloqueos_agenda (
   INDEX idx_medico_fecha (id_medico, fecha_inicio, fecha_fin)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Convención A (id/evento/publicado) — igual que citas/prescripciones/seguros,
--- no la convención B que usa svc_med.outbox. workers/outbox.worker.js
--- auto-detecta cuál convención usa cada schema vía INFORMATION_SCHEMA.
 CREATE TABLE IF NOT EXISTS outbox (
-  id              VARCHAR(36)  NOT NULL,
-  evento          VARCHAR(60)  NOT NULL,
-  payload         JSON         NOT NULL,
-  correlation_id  VARCHAR(36)  NULL,
-  publicado       TINYINT(1)   NOT NULL DEFAULT 0,
-  intentos        INT          NOT NULL DEFAULT 0,
-  created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  INDEX idx_publicado (publicado, created_at)
+  id_evento     VARCHAR(36)  NOT NULL,
+  tipo_evento   VARCHAR(100) NOT NULL,
+  payload       JSON         NOT NULL,
+  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  intentos      INT          NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(36) NULL,
+  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  publicado_en  TIMESTAMP    NULL,
+  error_msg     TEXT,
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ═══════════════════════════════════════════════════════════
@@ -588,15 +598,17 @@ CREATE TABLE IF NOT EXISTS eventos_procesados (
 -- cada evento saliente; sin esta tabla, una instalación nueva rompe la
 -- primera vez que se intenta notificar por WhatsApp/SMS.
 CREATE TABLE IF NOT EXISTS outbox (
-  id             VARCHAR(36)  NOT NULL,
-  evento         VARCHAR(60)  NOT NULL,
-  payload        JSON         NOT NULL,
-  correlation_id VARCHAR(36)  NULL,
-  publicado      TINYINT(1)   NOT NULL DEFAULT 0,
-  intentos       INT          NOT NULL DEFAULT 0,
-  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_publicado (publicado, created_at)
+  id_evento     VARCHAR(36)  NOT NULL,
+  tipo_evento   VARCHAR(100) NOT NULL,
+  payload       JSON         NOT NULL,
+  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  intentos      INT          NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(36) NULL,
+  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  publicado_en  TIMESTAMP    NULL,
+  error_msg     TEXT,
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ═══════════════════════════════════════════════════════════
@@ -688,22 +700,18 @@ CREATE TABLE IF NOT EXISTS recetas_contingencia (
   UNIQUE KEY uq_despacho (id_despacho)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- NOTA: esta tabla usa la convención A (id/evento/publicado) — a diferencia de
--- otros esquemas outbox en este archivo, que usan la convención B
--- (id_evento/tipo_evento/estado). Ver workers/outbox.worker.js, que detecta en
--- tiempo de ejecución cuál convención usa cada esquema. Corregido para igualar
--- la tabla viva (antes definía columnas que OutboxEventPublisher.js de
--- prescripciones nunca llegó a escribir).
 CREATE TABLE IF NOT EXISTS outbox (
-  id             VARCHAR(36) NOT NULL,
-  evento         VARCHAR(60) NOT NULL,
-  payload        JSON        NOT NULL,
-  correlation_id VARCHAR(36) DEFAULT NULL,
-  publicado      TINYINT(1)  NOT NULL DEFAULT 0,
-  intentos       INT         NOT NULL DEFAULT 0,
-  created_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_publicado (publicado, created_at)
+  id_evento     VARCHAR(36)  NOT NULL,
+  tipo_evento   VARCHAR(100) NOT NULL,
+  payload       JSON         NOT NULL,
+  estado        ENUM('PENDIENTE', 'PUBLICADO', 'FALLIDO') NOT NULL DEFAULT 'PENDIENTE',
+  intentos      INT          NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(36) NULL,
+  creado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  publicado_en  TIMESTAMP    NULL,
+  error_msg     TEXT,
+  PRIMARY KEY (id_evento),
+  INDEX idx_estado (estado, creado_en)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS eventos_procesados (

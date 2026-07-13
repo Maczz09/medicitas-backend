@@ -1,6 +1,7 @@
 const logger = require('../../../shared/logger/logger');
 const { Traza } = require('../domain/entities/Traza');
 const { DomainError } = require('../../../shared/domain/errors');
+const { ejecutarConContexto } = require('../../../shared/infrastructure/traceContext');
 
 const MAX_REINTENTOS = parseInt(process.env.AUD_MAX_REINTENTOS || '3');
 
@@ -19,8 +20,12 @@ class AuditoriaConsumer {
 
     await this.channel.prefetch(10);
 
+    // El handler corre DENTRO del contexto de traza del mensaje (header
+    // traceparent, propagado desde el request HTTP original vía outbox) para
+    // que sus spans queden en la misma cascada de Jaeger.
     await this.channel.consume(QUEUE, async (msg) => {
       if (!msg) return;
+      await ejecutarConContexto(msg.properties.headers, async () => {
 
       const routingKey = msg.fields.routingKey;
       let mensaje = null;
@@ -61,6 +66,7 @@ class AuditoriaConsumer {
           });
         }
       }
+      }); // fin ejecutarConContexto
     });
 
     logger.info('Auditoría consumer iniciado. Escuchando: q.auditoria (routing key: #)');

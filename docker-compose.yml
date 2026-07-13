@@ -133,9 +133,9 @@ services:
       retries: 3
     volumes:
       # Volúmenes para desarrollo (hot-reloading)
+      # (los PDFs ya no se escriben a disco: se generan en memoria y la
+      # descarga los regenera al vuelo — no hacen falta volúmenes de storage)
       - ./src:/app/src
-      - comprobantes_storage:/app/storage/comprobantes
-      - recetas_storage:/app/storage/recetas-contingencia
 
   # ─── WORKERS (PM2 administra Outbox + Tolerancia) ─────────
   workers:
@@ -345,8 +345,6 @@ volumes:
   mysql_data:
   redis_data:
   rabbitmq_data:
-  comprobantes_storage:
-  recetas_storage:
   prometheus_data:
   grafana_data:
   loki_data:

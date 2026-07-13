@@ -2,59 +2,44 @@ const cron = require('node-cron');
 const db = require('../src/config/database');
 const rabbitmq = require('../src/config/rabbitmq');
 
-const SCHEMAS = ['medicitas_users', 'svc_cit', 'svc_pac', 'svc_med', 'svc_pag', 'svc_hcl', 'svc_seg', 'svc_not', 'svc_aud', 'svc_pre', 'svc_fac'];
+// svc_hor faltaba en esta lista: los eventos del módulo horarios
+// (PlantillaHorarioActualizada, HorarioSemanaDefinido, BloqueoRegistrado) se
+// escribían a svc_hor.outbox pero NADIE los publicaba — quedaban PENDIENTE para
+// siempre y nunca llegaban a auditoría. Detectado durante la unificación (005).
+const SCHEMAS = ['medicitas_users', 'svc_cit', 'svc_pac', 'svc_med', 'svc_pag', 'svc_hcl', 'svc_seg', 'svc_not', 'svc_aud', 'svc_pre', 'svc_fac', 'svc_hor'];
 
-// El proyecto tiene DOS convenciones de columnas en las tablas outbox.
-// Detectamos cuál usa cada esquema y construimos las consultas en consecuencia.
-//   A: id / evento       / publicado (0|1)           / created_at
-//   B: id_evento / tipo_evento / estado (PENDIENTE..) / creado_en
-const CONV = {
-  A: { id: 'id', evento: 'evento', pend: 'publicado = 0', marcar: 'publicado = 1', orden: 'created_at' },
-  B: { id: 'id_evento', evento: 'tipo_evento', pend: "estado = 'PENDIENTE'", marcar: "estado = 'PUBLICADO', publicado_en = NOW()", orden: 'creado_en' },
-};
-
-const convCache = {};
-
-async function detectarConvencion(conn, schema) {
-  if (convCache[schema] !== undefined) return convCache[schema];
-  const [cols] = await conn.query(
-    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'outbox'`,
-    [schema],
-  );
-  const names = cols.map((c) => c.COLUMN_NAME);
-  let conv = null;
-  if (names.includes('publicado')) conv = CONV.A;
-  else if (names.includes('estado')) conv = CONV.B;
-  convCache[schema] = conv;
-  return conv;
-}
-
+// Convención ÚNICA de tabla outbox (unificada por db/migrations/005):
+//   id_evento / tipo_evento / payload / estado (PENDIENTE|PUBLICADO|FALLIDO) /
+//   intentos / correlation_id / creado_en / publicado_en / error_msg
+// Antes convivían dos convenciones y este worker las auto-detectaba por
+// INFORMATION_SCHEMA — esa complejidad ya no es necesaria.
 async function processOutbox() {
   for (const schema of SCHEMAS) {
     let conn;
     try {
       conn = await db.getConnection();
-      const c = await detectarConvencion(conn, schema);
-      if (!c) {
-        conn.release();
-        continue;
-      }
 
       const [eventos] = await conn.query(
-        `SELECT ${c.id} AS id, ${c.evento} AS evento, payload, correlation_id
+        `SELECT id_evento AS id, tipo_evento AS evento, payload, correlation_id
          FROM ${schema}.outbox
-         WHERE ${c.pend}
-         ORDER BY ${c.orden} ASC
+         WHERE estado = 'PENDIENTE'
+         ORDER BY creado_en ASC
          LIMIT 50 FOR UPDATE SKIP LOCKED`,
       );
 
       for (const evento of eventos) {
         try {
           await rabbitmq.publishEvent(evento.evento, evento.payload, evento.correlation_id, evento.id, schema);
-          await conn.query(`UPDATE ${schema}.outbox SET ${c.marcar} WHERE ${c.id} = ?`, [evento.id]);
+          await conn.query(
+            `UPDATE ${schema}.outbox SET estado = 'PUBLICADO', publicado_en = NOW() WHERE id_evento = ?`,
+            [evento.id],
+          );
         } catch (pubErr) {
           console.error(`[Outbox] Error publicando evento ${evento.id} (${schema}):`, pubErr.message);
-          await conn.query(`UPDATE ${schema}.outbox SET intentos = intentos + 1 WHERE ${c.id} = ?`, [evento.id]);
+          await conn.query(
+            `UPDATE ${schema}.outbox SET intentos = intentos + 1, error_msg = ? WHERE id_evento = ?`,
+            [String(pubErr.message).slice(0, 1000), evento.id],
+          );
         }
       }
       conn.release();
@@ -97,5 +82,5 @@ async function conectarConReintentos(maxIntentos = 10, delayMs = 3000) {
     processOutbox().catch(console.error);
   });
 
-  console.log('[Worker] Outbox cron iniciado (cada 5 seg, ambas convenciones).');
+  console.log('[Worker] Outbox cron iniciado (cada 5 seg, convención unificada).');
 })();

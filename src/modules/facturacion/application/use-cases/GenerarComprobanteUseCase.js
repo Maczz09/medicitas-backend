@@ -78,21 +78,24 @@ class GenerarComprobanteUseCase {
       logger.warn({ idPaciente }, 'No se pudo obtener nombre del paciente. Usando ID como fallback.');
     }
 
-    let rutaPdf, urlDescarga;
+    // El PDF ya NO se escribe a disco: se valida que se puede generar (en
+    // memoria) y se guarda solo la urlDescarga. La ruta de descarga regenera el
+    // PDF al vuelo desde el registro. rutaPdf queda null (columna conservada por
+    // compatibilidad histórica).
+    let urlDescarga;
     try {
       const resultado = await this.pdfGenerator.generar({
         ...comprobante,
         nombrePaciente,
       });
-      rutaPdf      = resultado.rutaPdf;
-      urlDescarga  = resultado.urlDescarga;
+      urlDescarga = resultado.urlDescarga;
     } catch (err) {
       logger.error({ err, idPago, idComprobante: comprobante.id }, 'Error al generar PDF');
       await this._marcarError(comprobante, `Error al generar PDF: ${err.message}`);
-      throw err; 
+      throw err;
     }
 
-    comprobante.marcarEmitido(rutaPdf, urlDescarga, nombrePaciente);
+    comprobante.marcarEmitido(null, urlDescarga, nombrePaciente);
 
     const conn2 = await this.getConnection();
     await conn2.beginTransaction();

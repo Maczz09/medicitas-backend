@@ -1,5 +1,6 @@
 const logger = require('../../../shared/logger/logger');
 const { EVENTOS_NOTIFICABLES } = require('../domain/templates/SMSTemplates');
+const { ejecutarConContexto } = require('../../../shared/infrastructure/traceContext');
 
 const MAX_REINTENTOS = parseInt(process.env.NOT_MAX_REINTENTOS || '3');
 
@@ -13,8 +14,12 @@ class NotificacionesConsumer {
     const QUEUE = 'q.notificaciones';
     await this.channel.prefetch(5);
 
+    // El handler corre DENTRO del contexto de traza del mensaje (header
+    // traceparent, propagado desde el request HTTP original vía outbox) para
+    // que sus spans queden en la misma cascada de Jaeger.
     await this.channel.consume(QUEUE, async (msg) => {
       if (!msg) return;
+      await ejecutarConContexto(msg.properties.headers, async () => {
 
       const routingKey = msg.fields.routingKey;
       let evento = null;
@@ -66,6 +71,7 @@ class NotificacionesConsumer {
           });
         }
       }
+      }); // fin ejecutarConContexto
     });
 
     logger.info('Notificaciones consumer iniciado. Escuchando: q.notificaciones');

@@ -17,13 +17,15 @@ class ConsultarComprobanteUseCase {
     return this._format(comp);
   }
 
-  async obtenerPdfPath(id) {
+  // Devuelve el comprobante EMITIDO para que la ruta de descarga regenere el
+  // PDF al vuelo en memoria (ya no se lee de disco).
+  async obtenerParaPdf(id) {
     const comp = await this.repo.findById(id);
     if (!comp) throw new DomainError('COMPROBANTE_NO_ENCONTRADO', 404, 'Comprobante no encontrado');
-    if (!comp.estaEmitido() || !comp.rutaPdf) {
+    if (!comp.estaEmitido()) {
       throw new DomainError('PDF_NO_DISPONIBLE', 404, 'El PDF del comprobante aún no está disponible');
     }
-    return comp.rutaPdf;
+    return comp;
   }
 
   _format(comp) {

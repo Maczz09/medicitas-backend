@@ -1,10 +1,7 @@
-const path = require('path');
-const fs = require('fs');
 const express = require('express');
 const { requireRole } = require('../../../shared/infrastructure/rbac.middleware');
 const { verifyToken } = require('../../../shared/infrastructure/auth.middleware');
 const { checkIdempotency } = require('../../../shared/infrastructure/api_idempotency.middleware');
-const { DomainError } = require('../../../shared/domain/errors');
 
 const DespachosMySQLRepository = require('../adapters/out/DespachosMySQLRepository');
 const OutboxEventPublisher = require('../adapters/out/OutboxEventPublisher');
@@ -31,10 +28,11 @@ const gateway = process.env.USE_MOCK_FARMACIA === 'true'
 const repo = new DespachosMySQLRepository();
 const eventPublisher = new OutboxEventPublisher();
 const recetasContingenciaRepo = new RecetasContingenciaMySQLRepository();
+const recetaPdfGenerator = new RecetaPDFGenerator();
 
 const generarRecetaPDFUseCase = new GenerarRecetaPDFUseCase({
   recetasContingenciaRepository: recetasContingenciaRepo,
-  pdfGenerator: new RecetaPDFGenerator(),
+  pdfGenerator: recetaPdfGenerator,
   eventPublisher,
   getConnection: async () => await dbPool.getConnection(),
   logger: require('../../../shared/logger/logger'),
@@ -198,13 +196,17 @@ router.get('/contingencia', verifyToken, requireRole(['Médico', 'Recepcionista'
 
 // Descarga pública (sin verifyToken): el link viaja por WhatsApp al paciente,
 // que no tiene sesión ni JWT — mismo patrón que /facturacion/comprobantes/:id/pdf.
+// El PDF se regenera al vuelo en memoria desde la BD (no se lee de disco).
 router.get('/contingencia/:id/pdf', async (req, res, next) => {
   try {
-    const rutaPdf = await consultarRecetasContingenciaUseCase.obtenerRutaPdf(req.params.id);
-    if (!fs.existsSync(rutaPdf)) {
-      return next(new DomainError('ERROR_LECTURA_PDF', 500, 'El archivo PDF no existe físicamente'));
-    }
-    res.download(rutaPdf, path.basename(rutaPdf));
+    const receta = await consultarRecetasContingenciaUseCase.obtenerParaPdf(req.params.id);
+    const buffer = await recetaPdfGenerator.generarBuffer(receta);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${receta.id}.pdf"`,
+      'Content-Length': buffer.length,
+    });
+    res.send(buffer);
   } catch (err) {
     next(err);
   }

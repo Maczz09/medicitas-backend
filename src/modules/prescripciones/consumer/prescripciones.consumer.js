@@ -1,4 +1,5 @@
 const logger = require('../../../shared/logger/logger');
+const { ejecutarConContexto } = require('../../../shared/infrastructure/traceContext');
 
 const QUEUE = 'q.prescripciones';
 const MAX_REINTENTOS = parseInt(process.env.PRE_MAX_REINTENTOS || '3');
@@ -12,8 +13,12 @@ class PrescripcionesConsumer {
   async iniciar() {
     await this.channel.prefetch(5);
 
+    // El handler corre DENTRO del contexto de traza del mensaje (header
+    // traceparent, propagado desde el request HTTP original vía outbox) para
+    // que sus spans queden en la misma cascada de Jaeger.
     await this.channel.consume(QUEUE, async (msg) => {
       if (!msg) return;
+      await ejecutarConContexto(msg.properties.headers, async () => {
 
       let evento;
       try {
@@ -49,6 +54,7 @@ class PrescripcionesConsumer {
           }, 5000);
         }
       }
+      }); // fin ejecutarConContexto
     });
 
     logger.info({ queue: QUEUE }, 'prescriptions_service: consumer iniciado');

@@ -23,7 +23,7 @@ async function processRecordatorios30m() {
 
       const correlationId = uuidv4();
       await conn.query(
-        `INSERT INTO svc_cit.outbox (id, evento, payload, correlation_id, publicado) VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO svc_cit.outbox (id_evento, tipo_evento, payload, correlation_id) VALUES (?, ?, ?, ?)`,
         [
           uuidv4(),
           'RecordatorioCita',
@@ -33,8 +33,7 @@ async function processRecordatorios30m() {
             fecha_hora: cita.fecha_hora,
             mensaje: 'Su cita médica comienza en 30 minutos. Por favor acérquese a recepción.'
           }),
-          correlationId,
-          0
+          correlationId
         ]
       );
 

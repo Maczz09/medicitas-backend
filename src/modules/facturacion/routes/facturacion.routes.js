@@ -5,12 +5,13 @@ const { verifyToken } = require('../../../shared/infrastructure/auth.middleware'
 const { ComprobantesMySQLRepository } = require('../adapters/out/repositories/ComprobantesMySQLRepository');
 const { ConsultarComprobanteUseCase } = require('../application/use-cases/ConsultarComprobanteUseCase');
 const { FacturacionController }       = require('../adapters/in/FacturacionController');
+const { PDFKitGenerator }             = require('../adapters/out/pdf/PDFKitGenerator');
 
 const dbPool = require('../../../config/database');
 
 const repo = new ComprobantesMySQLRepository(dbPool);
 const consultarUseCase = new ConsultarComprobanteUseCase({ comprobantesRepository: repo });
-const controller = new FacturacionController(consultarUseCase);
+const controller = new FacturacionController(consultarUseCase, new PDFKitGenerator());
 
 const router = Router();
 

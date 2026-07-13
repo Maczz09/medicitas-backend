@@ -1,10 +1,7 @@
-const path = require('path');
-const fs   = require('fs');
-const { DomainError } = require('../../../../shared/domain/errors');
-
 class FacturacionController {
-  constructor(consultarUseCase) {
+  constructor(consultarUseCase, pdfGenerator) {
     this.consultarUseCase = consultarUseCase;
+    this.pdfGenerator = pdfGenerator;
   }
 
   consultarPorId = async (req, res, next) => {
@@ -27,11 +24,14 @@ class FacturacionController {
 
   descargarPdf = async (req, res, next) => {
     try {
-      const rutaPdf = await this.consultarUseCase.obtenerPdfPath(req.params.id);
-      if (!fs.existsSync(rutaPdf)) {
-        return next(new DomainError('ERROR_LECTURA_PDF', 500, 'El archivo PDF no existe físicamente'));
-      }
-      res.download(rutaPdf, path.basename(rutaPdf));
+      const comp = await this.consultarUseCase.obtenerParaPdf(req.params.id);
+      const buffer = await this.pdfGenerator.generarBuffer(comp);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${comp.numero}.pdf"`,
+        'Content-Length': buffer.length,
+      });
+      res.send(buffer);
     } catch (err) {
       next(err);
     }

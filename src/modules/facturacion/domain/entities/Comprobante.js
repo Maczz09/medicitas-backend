@@ -13,6 +13,7 @@ class Comprobante {
     metodoPago, tieneCobertura, estado,
     rutaPdf, urlDescarga, nombrePaciente,
     errorMensaje, intentosGeneracion, correlationId,
+    fechaEmision,
   }) {
     this.id                   = id;
     this.idPago               = idPago;
@@ -32,6 +33,9 @@ class Comprobante {
     this.errorMensaje         = errorMensaje         || null;
     this.intentosGeneracion   = intentosGeneracion   || 0;
     this.correlationId        = correlationId        || null;
+    // created_at de la BD — el PDF regenerado en la descarga imprime esta
+    // fecha (no la del día de la descarga).
+    this.fechaEmision         = fechaEmision          || null;
   }
 
   static crear({ idPago, idPaciente, idCita, tipo, numero,

@@ -31,14 +31,30 @@ class EncuentroMySQLRepository {
         [idExpediente],
       );
 
-      const encuentros = await Promise.all(rows.map(async (enc) => {
+      // Antes: una query de prescripciones POR CADA encuentro del page (N+1).
+      // Ahora: una sola query con WHERE id_encuentro IN (...) y se agrupa en
+      // memoria — 1 round-trip en vez de N.
+      const ids = rows.map((e) => e.idEncuentro);
+      let porEncuentro = new Map();
+      if (ids.length > 0) {
+        const placeholders = ids.map(() => '?').join(',');
         const [prescs] = await conn.query(
-          `SELECT id_prescripcion AS id, medicamento, dosis, frecuencia, duracion, indicaciones
+          `SELECT id_prescripcion AS id, id_encuentro AS idEncuentro,
+                  medicamento, dosis, frecuencia, duracion, indicaciones
            FROM svc_hcl.prescripciones_clinicas
-           WHERE id_encuentro = ?`,
-          [enc.idEncuentro],
+           WHERE id_encuentro IN (${placeholders})`,
+          ids,
         );
-        return { ...enc, prescripciones: prescs };
+        for (const p of prescs) {
+          if (!porEncuentro.has(p.idEncuentro)) porEncuentro.set(p.idEncuentro, []);
+          const { idEncuentro, ...pres } = p;
+          porEncuentro.get(p.idEncuentro).push(pres);
+        }
+      }
+
+      const encuentros = rows.map((enc) => ({
+        ...enc,
+        prescripciones: porEncuentro.get(enc.idEncuentro) || [],
       }));
 
       return { total, pagina: parseInt(pagina, 10), porPagina: limit, encuentros };

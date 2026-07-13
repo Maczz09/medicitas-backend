@@ -1,4 +1,5 @@
 const asyncContext = require('../logger/asyncContext');
+const { capturarTraceMeta } = require('./traceContext');
 
 async function publicarEventoOutbox(conn, schema, { idEvento, tipoEvento, payload, correlationId }) {
   // Leer identidad del actor desde el contexto async (inyectado por verifyToken).
@@ -10,9 +11,10 @@ async function publicarEventoOutbox(conn, schema, { idEvento, tipoEvento, payloa
     rol:    store?.get('actorRol')    || null,
   };
 
-  // _actor y _timestamp se incrusta en el payload para sobrevivir el viaje outbox→RabbitMQ.
-  // publishEvent los extrae y los sube al sobre del mensaje antes de enviar.
-  const payloadConMeta = { ...payload, _actor: actor, _timestamp: new Date().toISOString() };
+  // _actor, _timestamp y _traceparent se incrustan en el payload para sobrevivir
+  // el viaje outbox→RabbitMQ. publishEvent los extrae y los sube al sobre/headers
+  // del mensaje antes de enviar (el traceparent une la traza end-to-end en Jaeger).
+  const payloadConMeta = { ...payload, _actor: actor, _timestamp: new Date().toISOString(), ...capturarTraceMeta() };
 
   await conn.query(
     `INSERT INTO ${schema}.outbox (id_evento, tipo_evento, payload, correlation_id)

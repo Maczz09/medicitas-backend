@@ -10,13 +10,16 @@ class ConsultarRecetasContingenciaUseCase {
     return this.recetasRepo.findAll({ page, limit }, this.db);
   }
 
-  async obtenerRutaPdf(id) {
-    const receta = await this.recetasRepo.findById(id, this.db);
+  // Devuelve la receta con los datos enriquecidos (paciente, encuentro,
+  // referencia de farmacia) para que la ruta de descarga regenere el PDF al
+  // vuelo en memoria (ya no se lee de disco).
+  async obtenerParaPdf(id) {
+    const receta = await this.recetasRepo.findParaPdf(id, this.db);
     if (!receta) {
       throw new DomainError('RECETA_CONTINGENCIA_NO_ENCONTRADA', 404,
         `No existe receta de contingencia con id ${id}.`);
     }
-    return receta.rutaPdf;
+    return receta;
   }
 
   /** Detalle completo de un despacho para la vista de auditoría/médico: hora, médico (CMP), cita, farmacia. */

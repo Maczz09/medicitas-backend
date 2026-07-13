@@ -1,4 +1,5 @@
 const logger = require('../../../shared/logger/logger');
+const { ejecutarConContexto } = require('../../../shared/infrastructure/traceContext');
 
 const MAX_REINTENTOS = parseInt(process.env.FAC_MAX_REINTENTOS || '3');
 
@@ -17,8 +18,12 @@ class FacturacionConsumer {
 
     await this.channel.prefetch(1);
 
+    // El handler corre DENTRO del contexto de traza del mensaje (header
+    // traceparent, propagado desde el request HTTP original vía outbox) para
+    // que sus spans queden en la misma cascada de Jaeger.
     await this.channel.consume(QUEUE, async (msg) => {
       if (!msg) return;
+      await ejecutarConContexto(msg.properties.headers, async () => {
 
       const correlationId = msg.properties.correlationId || null;
       let evento = null;
@@ -66,6 +71,7 @@ class FacturacionConsumer {
           }, 5000);
         }
       }
+      }); // fin ejecutarConContexto
     });
 
     logger.info('Facturación consumer iniciado. Escuchando: q.facturacion');
