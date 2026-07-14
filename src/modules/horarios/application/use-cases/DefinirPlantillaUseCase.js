@@ -1,5 +1,6 @@
 const { PlantillaHorario } = require('../../domain/entities/PlantillaHorario');
 const { MedicoNoEncontradoError } = require('../../domain/horarios.errors');
+const { invalidarCacheDisponibilidad } = require('../../infrastructure/invalidarCacheDisponibilidad');
 
 // Migrado de medicos.usecases.js#registrarHorarios. Reemplazo total de la
 // plantilla (igual semántica que el saveHorarios viejo: DELETE + re-INSERT
@@ -46,6 +47,9 @@ class DefinirPlantillaUseCase {
     } finally {
       conn.release();
     }
+
+    // La agenda cambió → invalidar la caché de disponibilidad de citas.
+    await invalidarCacheDisponibilidad(idMedico);
   }
 }
 

@@ -156,6 +156,33 @@ cascada = +1 cita, +1 pago, +1 comprobante, +1 SMS (números consistentes).
 > escrituras → **0% errores 5xx**, cascadas completas, y los 12 servicios con
 > trazas (Jaeger), métricas (Grafana) y logs (Loki). Ver `loadtest/COMANDOS.md`.
 
+## Bugs encontrados al construir el flujo clínico E2E (2026-07-13, noche)
+
+### E. Dos fuentes de verdad de disponibilidad — "fase 4" del módulo horarios ✅
+`MedicoDisponibilidadDBAdapter` (el que valida las RESERVAS de citas) leía
+`svc_med.horarios_base` (tabla del módulo viejo) con su propia lógica: ignoraba
+los horarios de SEMANA específica y los bloqueos de `svc_hor`. GET /slots
+mostraba un slot libre y la reserva lo rechazaba con COLISION_HORARIO (o al
+revés: aceptaba horas recién bloqueadas). Fix: el adaptador ahora delega en
+`ResolverHorarioEfectivoUseCase` + `bloqueos_agenda` — la MISMA fuente única
+que /slots (completa la "fase 4" que el comentario de ese use case anunciaba).
+
+### F. La caché de disponibilidad no se invalidaba al cambiar la agenda ✅
+Definir un horario (plantilla o semana) o un bloqueo dejaba
+`cache:disponibilidad:<medico>:<fecha>` (TTL 300 s) obsoleta: hasta 5 minutos
+de reservas validadas contra la agenda VIEJA. Fix:
+`src/modules/horarios/infrastructure/invalidarCacheDisponibilidad.js`, llamado
+tras el commit en DefinirHorarioSemana/DefinirPlantilla/RegistrarBloqueo.
+
+### G. Observabilidad por defecto en TODAS las máquinas ✅
+`OTEL_SDK_DISABLED` tenía default `true` en modo carga → en cualquier clon
+nuevo (la laptop) las pruebas corrían SIN trazas y `medicitas-backend` ni
+aparecía en Jaeger. Ahora el default del repo es **false con muestreo al 10%**
+(`parentbased_traceidratio`) — seguro para WSL2 (el colapso histórico era al
+100%) y las trazas se ven siempre, en cualquier máquina, sin variables de
+sesión. `lean` ya no para Jaeger. Diagnóstico en 1 comando:
+`loadtest/verificar-observabilidad.ps1|.sh`.
+
 ## Ya hecho en sesiones anteriores (no repetir)
 - Right-size del pool + índice `(activo, created_at)` + query de pacientes sin
   `SQL_CALC_FOUND_ROWS` → el 1M pasa al 100%.

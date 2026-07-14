@@ -127,6 +127,22 @@ UNA traza que cruza pacientes → seguros → citas → pagos → **facturación
 (comprobante+PDF)** → **notificaciones (SMS)** → auditoría. El resumen de k6
 imprime `cascadas_completas` = cuántas cadenas full-stack se completaron.
 
+### 3.2) FLUJO CLÍNICO COMPLETO — la "traza reina" (1 comando)
+
+Los flujos de HCL y farmacia exigen cita de HOY + En_Atencion, así que la carga
+masiva no los cubre. Este script ejecuta UNA vez el viaje entero y te deja los
+correlationIds para buscarlo en Jaeger/Loki:
+
+```powershell
+bash loadtest/flujo-clinico.sh     # funciona igual en PowerShell (invoca Git Bash)
+```
+Pasos que ejecuta: paciente → expediente → cobertura (aseguradora) → cita HOY →
+ingreso (En_Atencion) → pago (→ comprobante+PDF + SMS) → **encuentro clínico con
+prescripción** (→ PrescripcionEmitida → despacho → **farmacia-api**) → verifica
+el despacho DESPACHADA y la auditoría del correlationId. Si el médico no tiene
+agenda a esa hora, define un horario de semana para HOY y sigue — corre a
+cualquier hora.
+
 ---
 
 ## 4) Resiliencia — dar de baja un servicio
@@ -193,6 +209,20 @@ seguros-fallback`. (En Git Bash: `bash resiliencia-servicios.sh <accion> <servic
 resto sigue verde en Grafana y que las trazas del módulo caído desaparecen en
 Jaeger. Luego recupéralo y muestra que vuelve.
 
+### 4.2) CHAOS MONKEY — fallos aleatorios bajo carga (plan: docs/CHAOS-MONKEY.md)
+
+Tumba servicios AL AZAR (10-30 s cada uno) mientras el sistema está bajo carga,
+lo deja todo en `chaos-log.txt` con timestamps y SIEMPRE restaura al final:
+
+```powershell
+# T1: carga sostenida            # T2: el mono suelto
+.\run.ps1 full                    .\chaos-monkey.ps1                       # 5 min, solo módulos (503 limpio)
+                                  .\chaos-monkey.ps1 -Duracion 10 -Nivel infra  # + redis/rabbit/farmacia/...
+# Git Bash: ./chaos-monkey.sh 10 infra
+```
+Nunca toca mysql, nginx ni la observabilidad. Los criterios de éxito y qué
+métricas mirar están en [docs/CHAOS-MONKEY.md](../docs/CHAOS-MONKEY.md).
+
 ---
 
 ## 5) Observar resultados
@@ -201,35 +231,36 @@ Jaeger. Luego recupéralo y muestra que vuelve.
 - **k6** imprime al final: `http_reqs` (throughput), `http_req_duration` (p95/p99),
   `errores_5xx` (umbral <1%).
 
-**Ver trazas DURANTE la carga (muestreadas 2%)** — baja el throughput ~30%,
-solo para demostrar el flujo end-to-end:
+**Trazas DURANTE la carga: AHORA VIENEN ACTIVAS POR DEFECTO** (desde el commit
+que cambió `docker-compose.loadtest.yml`): OTel corre SIEMPRE, muestreado al
+**10%** en modo carga y al 100% en modo normal. Ya NO hay que setear ninguna
+variable — cualquier máquina que haga `git pull` + `up -d` ve las trazas.
 
-> ⚠️ **`$env:VAR` solo vive en la MISMA sesión de PowerShell.** Si lo pones en
-> una línea y el `docker compose up -d` en otra ejecución/terminal separada, la
-> variable no llega y el backend arranca con OTel APAGADO igual (default
-> `true`) — y `medicitas-backend` nunca aparecerá en el dropdown de Jaeger.
-> **Todo en una sola línea, con `;`:**
+Solo si quieres el máximo throughput absoluto para pasar un nivel (cuesta ~30%
+tenerlo encendido), apágalo explícito en UNA sola línea:
+```powershell
+$env:OTEL_SDK_DISABLED="true"; docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d; Remove-Item Env:OTEL_SDK_DISABLED
+```
+> ⚠️ `$env:VAR` solo vive en la MISMA sesión de PowerShell — la variable y el
+> `up -d` deben ir en la misma línea, con `;`.
+
+### ⭐ "No veo las trazas / los logs" (laptop u otra máquina) — diagnóstico en 1 comando
 
 ```powershell
-$env:OTEL_SDK_DISABLED="false"; docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d; Remove-Item Env:OTEL_SDK_DISABLED
+cd loadtest
+.\verificar-observabilidad.ps1        # PowerShell
+bash verificar-observabilidad.sh      # Git Bash
 ```
-```powershell
-# ...corre la prueba; en Jaeger (http://localhost:16686) verás ~2% de las trazas.
-# NO apliques lean sobre Jaeger si quieres esto.
-```
-
-**Verificar que sí quedó activo** (si `medicitas-backend` no aparece en el
-dropdown de servicios de Jaeger, revisa esto ANTES de sospechar de otra cosa):
-```powershell
-docker exec medicitas_backend printenv OTEL_SDK_DISABLED     # debe decir "false"
-docker logs medicitas_backend --since 2m | Select-String Tracing
-#   → debe decir "OpenTelemetry iniciado — exportando a ..."
-#   → si dice "OpenTelemetry DESACTIVADO", la variable no llegó: repite el
-#     comando de arriba TODO en una sola línea y recrea el contenedor.
-```
-Jaeger solo lista un servicio **después** de recibir su primera traza — si
-acabas de activar OTel, genera al menos una petición (`.\run.ps1 smoke` o un
-login) antes de esperar verlo en el dropdown.
+Chequea las 7 piezas (contenedores, OTel, Jaeger, Prometheus :9091, Loki,
+readiness), genera una traza de prueba, y por cada fallo te imprime el **FIX**
+exacto. Causas típicas tras un `git pull`:
+1. El contenedor viejo sigue con `OTEL_SDK_DISABLED=true` → hay que
+   **recrearlo**: `docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d --force-recreate backend workers`
+   (un simple `restart` NO relee las variables del compose).
+2. Prometheus con config vieja (scrapeando :3000 en vez de :9091) →
+   `docker restart medicitas_prometheus`.
+3. Jaeger solo lista un servicio tras recibir su PRIMERA traza → genera una
+   petición (`.\run.ps1 smoke`) antes de buscarlo en el dropdown.
 
 ---
 

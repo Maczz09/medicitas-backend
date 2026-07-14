@@ -6,10 +6,12 @@
 #   ./lean.sh restore   # para recuperar todo
 set -euo pipefail
 
+# Jaeger NO se para: el tracing corre muestreado también en carga y las trazas
+# de las pruebas deben verse siempre.
 NO_ESENCIALES="farmacia_api mysql_farmacia farmacia_autoheal \
 aseguradora_prosalud_api aseguradora_mysql aseguradora_rabbitmq aseguradora_autoheal \
 seguros_fallback_lb seguros_fallback_1 seguros_fallback_2 mysql_seguros_fallback \
-medicitas_jaeger medicitas_frontend"
+medicitas_frontend"
 
 case "${1:-stop}" in
   stop)    echo "Parando no esenciales..."; docker stop $NO_ESENCIALES 2>/dev/null || true; echo "Listo." ;;

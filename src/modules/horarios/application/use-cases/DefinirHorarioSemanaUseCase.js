@@ -1,5 +1,6 @@
 const { HorarioSemana } = require('../../domain/entities/HorarioSemana');
 const { MedicoNoEncontradoError } = require('../../domain/horarios.errors');
+const { invalidarCacheDisponibilidad } = require('../../infrastructure/invalidarCacheDisponibilidad');
 
 // Fase 2 del plan: define (crea o reemplaza por completo) el horario de UNA
 // semana específica de un médico. A diferencia de DefinirPlantillaUseCase,
@@ -47,6 +48,10 @@ class DefinirHorarioSemanaUseCase {
     } finally {
       conn.release();
     }
+
+    // La agenda cambió → invalidar la caché de disponibilidad de citas (si no,
+    // las reservas se validan contra la agenda VIEJA hasta 5 minutos).
+    await invalidarCacheDisponibilidad(idMedico);
 
     return semana;
   }

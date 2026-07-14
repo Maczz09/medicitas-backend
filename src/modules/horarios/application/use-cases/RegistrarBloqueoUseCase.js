@@ -1,5 +1,6 @@
 const { Bloqueo } = require('../../domain/entities/Bloqueo');
 const { MedicoNoEncontradoError } = require('../../domain/horarios.errors');
+const { invalidarCacheDisponibilidad } = require('../../infrastructure/invalidarCacheDisponibilidad');
 
 // Migrado de medicos.usecases.js#registrarBloqueo.
 class RegistrarBloqueoUseCase {
@@ -44,6 +45,10 @@ class RegistrarBloqueoUseCase {
     } finally {
       conn.release();
     }
+
+    // Un bloqueo nuevo debe reflejarse al instante en las reservas (si no, la
+    // caché de disponibilidad sigue ofreciendo las horas recién bloqueadas).
+    await invalidarCacheDisponibilidad(idMedico);
 
     return bloqueo;
   }

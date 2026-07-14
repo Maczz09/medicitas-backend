@@ -88,6 +88,9 @@ services:
       # Tracing distribuido → Jaeger
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_SERVICE_NAME: medicitas-backend
+      # Trazas SIEMPRE encendidas por defecto (en carga, el override de loadtest
+      # las muestrea al 10% — ver docker-compose.loadtest.yml).
+      OTEL_SDK_DISABLED: "${OTEL_SDK_DISABLED:-false}"
       PORT: 3000
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
@@ -153,6 +156,7 @@ services:
       # Tracing distribuido → Jaeger
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_SERVICE_NAME: medicitas-workers
+      OTEL_SDK_DISABLED: "${OTEL_SDK_DISABLED:-false}"
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER}

@@ -10,14 +10,15 @@
 param([ValidateSet('stop','restore')][string]$Accion = 'stop')
 
 # No se tocan: mysql, redis, rabbitmq, backend, workers, nginx (el sistema bajo
-# prueba) ni la observabilidad de medicitas (prometheus/grafana/loki/promtail).
-# Se paran: los stacks externos (no se cargan en el test) + Jaeger (el tracing
-# está apagado en modo carga) + el frontend (no se prueba la API por él).
+# prueba) ni la observabilidad COMPLETA de medicitas (prometheus/grafana/loki/
+# promtail/JAEGER — el tracing ahora corre muestreado también en carga, así que
+# Jaeger debe seguir vivo para ver las trazas de las pruebas).
+# Se paran: los stacks externos (no se cargan en el test) + el frontend.
 $NoEsenciales = @(
   'farmacia_api','mysql_farmacia','farmacia_autoheal',
   'aseguradora_prosalud_api','aseguradora_mysql','aseguradora_rabbitmq','aseguradora_autoheal',
   'seguros_fallback_lb','seguros_fallback_1','seguros_fallback_2','mysql_seguros_fallback',
-  'medicitas_jaeger','medicitas_frontend'
+  'medicitas_frontend'
 )
 
 if ($Accion -eq 'stop') {
