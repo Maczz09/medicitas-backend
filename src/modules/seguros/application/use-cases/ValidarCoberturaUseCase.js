@@ -37,7 +37,21 @@ class ValidarCoberturaUseCase {
     }
 
     // ── 3. Validar que el paciente existe (SVC-PAC-005) ───────────────────
-    const existePaciente = await this.pacienteValidator.existePaciente(idPaciente);
+    // Resiliencia (hallazgo del chaos monkey 2026-07-13): distinguir "el
+    // paciente NO existe" (404, negocio) de "el servicio de pacientes está
+    // CAÍDO/inalcanzable" (503 reintentable). Antes, con `pacientes` de baja,
+    // esta llamada lanzaba un Error genérico → 500 en /coberturas/validar
+    // (parecía un crash). Ahora degrada con 503: acoplamiento síncrono entre
+    // módulos, pero con degradación grácil y honesta.
+    let existePaciente;
+    try {
+      existePaciente = await this.pacienteValidator.existePaciente(idPaciente);
+    } catch (err) {
+      logger.warn({ err: err.message, idPaciente, correlationId },
+        'Servicio de pacientes no disponible al validar cobertura — degradando con 503');
+      throw new DomainError('DEPENDENCIA_NO_DISPONIBLE', 503,
+        'No se puede validar la cobertura ahora: el servicio de pacientes no responde. Reintente en unos momentos.');
+    }
     if (!existePaciente) {
       throw new DomainError('PACIENTE_NO_ENCONTRADO', 404,
         `El paciente ${idPaciente} no existe`);

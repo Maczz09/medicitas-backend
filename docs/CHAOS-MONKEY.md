@@ -88,3 +88,40 @@ Anota la línea del chaos-log (timestamp + objetivo), el síntoma (qué métrica
 traza lo delata) y clasifícalo: ¿falta un circuit breaker? ¿un timeout muy
 largo? ¿un consumer sin reintento? Eso es exactamente el output valioso de un
 experimento de caos — cada hallazgo va a `docs/MEJORAS.md`.
+
+## 7) Resultados de la 1ª corrida (2026-07-13)
+
+Ejecutado: nivel `modulos` 3 min bajo carga (~260 req/s, 18 VUs) + prueba
+controlada de infra (RabbitMQ).
+
+**Criterios CUMPLIDOS:**
+- ✅ **Aislamiento**: el mono tumbó seguros→pacientes→medicos→citas (uno a la
+  vez); durante cada ventana solo ESE módulo daba 503, el resto 200. 4151×503
+  concentrados en las rutas de los módulos caídos.
+- ✅ **Recuperación automática**: cero reinicios manuales; al terminar, 9/9
+  módulos arriba y readiness READY.
+- ✅ **Sin pérdida de eventos (RabbitMQ)**: con RabbitMQ caído, POST /pacientes
+  siguió devolviendo 201 (patrón outbox: escribe a MySQL, no a Rabbit) y los
+  eventos se acumularon como PENDIENTE; al recuperar Rabbit, el worker los
+  drenó (contador bajando monótonamente). Ningún evento perdido.
+- ✅ **Trazabilidad**: cada 503/flujo quedó en Jaeger (trazas muestreadas) y en
+  Loki por correlationId.
+
+**HALLAZGO que el caos EXPUSO (y se corrigió el mismo día):**
+- 🐞 **Acoplamiento síncrono seguros→pacientes sin degradación grácil.** Al
+  bajar `pacientes`, `POST /coberturas/validar` llamaba internamente a la API
+  de Pacientes (`ValidarCoberturaUseCase` línea 40, `existePaciente`), fallaba
+  y lanzaba **500** genérico (294 casos durante la ventana). Un 500 parece un
+  crash, no una caída controlada. **Fix**: distinguir "paciente no existe"
+  (404) de "servicio de pacientes inalcanzable" → ahora **503
+  DEPENDENCIA_NO_DISPONIBLE** (reintentable). Verificado: con pacientes caído
+  /validar da 503; con pacientes arriba, 200.
+
+**OBSERVACIONES (tuning, no bugs):**
+- El worker de outbox drena a ritmo fijo (`LIMIT 50` por ciclo de 5 s ≈ 600
+  eventos/min por esquema). Bajo escritura MUY pesada sostenida (las pruebas de
+  40k con 70% escrituras) el backlog crece; drena solo cuando baja la carga. Si
+  la carga real se acerca a ese techo, subir el batch o bajar el intervalo.
+- `POST /pacientes` sin `telefono` da 500 (`Column 'telefono' cannot be null`)
+  en vez de 400: el schema Zod lo marca opcional pero la columna es NOT NULL.
+  Mismatch schema↔BD (candidato a MEJORAS, no crítico).

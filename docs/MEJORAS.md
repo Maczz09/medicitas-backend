@@ -183,6 +183,29 @@ aparecía en Jaeger. Ahora el default del repo es **false con muestreo al 10%**
 sesión. `lean` ya no para Jaeger. Diagnóstico en 1 comando:
 `loadtest/verificar-observabilidad.ps1|.sh`.
 
+## Hallazgos del experimento Chaos Monkey (2026-07-13)
+
+Ver `docs/CHAOS-MONKEY.md §7` para el detalle. El experimento (bajar servicios
+al azar bajo carga) cumplió aislamiento, recuperación automática, sin pérdida
+de eventos y trazabilidad. Expuso además:
+
+### H. Acoplamiento seguros→pacientes sin degradación grácil ✅ CORREGIDO
+Con `pacientes` de baja, `POST /coberturas/validar` lanzaba **500** (llamaba
+internamente a la API de Pacientes vía `existePaciente` sin manejo de fallo). Un
+500 parece crash. Fix en `ValidarCoberturaUseCase`: distinguir 404 (no existe)
+de servicio caído → **503 DEPENDENCIA_NO_DISPONIBLE** reintentable. Verificado.
+
+### I. (PENDIENTE) Backlog del outbox bajo escritura pesada
+El worker drena `LIMIT 50` por ciclo de 5 s (~600 ev/min por esquema). Bajo
+carga sostenida muy alta el backlog crece (drena al bajar la carga). Si la carga
+real se acerca al techo: subir el batch o reducir el intervalo (con cuidado del
+tiempo de lock). No crítico para uso normal.
+
+### J. (PENDIENTE) `POST /pacientes` sin telefono → 500 en vez de 400
+El schema Zod marca `telefono` opcional pero la columna `svc_pac.pacientes.
+telefono` es NOT NULL → 500 (`Column 'telefono' cannot be null`). Alinear:
+hacer la columna nullable, o el schema obligatorio, o default '' en el repo.
+
 ## Ya hecho en sesiones anteriores (no repetir)
 - Right-size del pool + índice `(activo, created_at)` + query de pacientes sin
   `SQL_CALC_FOUND_ROWS` → el 1M pasa al 100%.

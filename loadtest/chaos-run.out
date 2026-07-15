@@ -1,0 +1,11 @@
+22:48:15 | === CHAOS MONKEY inicia: 3 min, nivel=modulos ===
+22:48:16 | CAOS: kill-switch OFF 'seguros' (caído 12s → 503)
+22:48:29 | RECUPERA: kill-switch ON 'seguros'
+22:48:52 | CAOS: kill-switch OFF 'pacientes' (caído 14s → 503)
+22:49:07 | RECUPERA: kill-switch ON 'pacientes'
+22:49:31 | CAOS: kill-switch OFF 'medicos' (caído 22s → 503)
+22:49:55 | RECUPERA: kill-switch ON 'medicos'
+22:50:35 | CAOS: kill-switch OFF 'citas' (caído 10s → 503)
+22:50:47 | RECUPERA: kill-switch ON 'citas'
+22:51:27 | === RESTAURANDO TODO ===
+22:51:40 | === chaos terminado — todo restaurado ===
