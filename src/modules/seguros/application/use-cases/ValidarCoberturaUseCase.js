@@ -47,6 +47,11 @@ class ValidarCoberturaUseCase {
     try {
       existePaciente = await this.pacienteValidator.existePaciente(idPaciente);
     } catch (err) {
+      // El adaptador (seguros/PacienteHttpAdapter) ya lanza un DomainError bien
+      // formado, con la distinción circuito-abierto/reintentos-agotados que
+      // interpreta el frontend — se deja pasar tal cual en vez de
+      // reemplazarlo por un texto fijo que perdería esa distinción.
+      if (err instanceof DomainError) throw err;
       logger.warn({ err: err.message, idPaciente, correlationId },
         'Servicio de pacientes no disponible al validar cobertura — degradando con 503');
       throw new DomainError('DEPENDENCIA_NO_DISPONIBLE', 503,

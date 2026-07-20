@@ -1,0 +1,81 @@
+groups:
+  - name: medicitas-operativo
+    rules:
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="medicitas-backend"}[5m])) by (le)) > 2.0
+        for: 2m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: "Latencia alta detectada (p95 > 2s)"
+          impact: "Los pacientes están experimentando demoras al navegar o pagar. Conversión en riesgo."
+          runbook: "Revisar logs en Loki filtrando por durationMs > 2000. Escalar el número de workers si el CPU está saturado."
+
+      - alert: HighErrorRate
+        expr: sum(rate(http_request_errors_total{job="medicitas-backend"}[5m])) / sum(rate(http_requests_total{job="medicitas-backend"}[5m])) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: "Tasa de error superior al 5%"
+          impact: "Pérdida de transacciones o agendamiento fallido. Impacto directo a ingresos."
+          runbook: "Revisar Loki buscando errorCode != null. Validar si la base de datos está rechazando conexiones."
+
+      - alert: CircuitBreakerOpen
+        expr: medicitas_circuit_breaker_state == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: integracion
+        annotations:
+          summary: "Circuit Breaker Abierto para {{ $labels.service }}"
+          impact: "Servicio degradado. Fallback activo. Posible pérdida de consistencia con externos."
+          runbook: "El servicio externo está fallando. Validar portal del proveedor (Aseguradora/Farmacia). No reiniciar el backend, el sistema se recuperará solo (Half-Open)."
+
+      - alert: OutboxSaturation
+        expr: medicitas_outbox_pending_messages > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: workers
+        annotations:
+          summary: "Saturación en el patrón Outbox"
+          impact: "Retraso en el envío de correos, facturas asíncronas y sincronización entre microservicios."
+          runbook: "Revisar estado de RabbitMQ. Verificar si el OutboxWorker está caído o produciendo errores en Loki."
+
+  - name: servicios-externos
+    rules:
+      - alert: ServicioExternoCaido
+        expr: up{job=~"farmacia-api|aseguradora-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: integracion
+        annotations:
+          summary: "{{ $labels.job }} no responde al scrape de Prometheus"
+          impact: "MediCitas no puede validar coberturas o despachar recetas — el Circuit Breaker debería abrir y activar fallback, pero el servicio real está totalmente inalcanzable."
+          runbook: "Verificar `docker ps` del stack de {{ $labels.job }} y sus logs. Confirmar que el contenedor no quedó en crash-loop tras un deploy."
+
+      - alert: HighErrorRateServicioExterno
+        expr: sum by (job) (rate(http_request_errors_total{job=~"farmacia-api|aseguradora-api"}[5m])) / sum by (job) (rate(http_requests_total{job=~"farmacia-api|aseguradora-api"}[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: integracion
+        annotations:
+          summary: "Tasa de error superior al 5% en {{ $labels.job }}"
+          impact: "Validaciones de cobertura o despachos de receta fallando — riesgo de degradar la experiencia en recepción/farmacia."
+          runbook: "Revisar Loki con {app=\"{{ $labels.job }}\"}. Si es 5xx, revisar la conexión a su base de datos; si es 4xx, revisar el contrato del payload enviado por MediCitas."
+
+      - alert: WebhooksSalientesSaturados
+        expr: webhooks_salientes_pendientes > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: integracion
+        annotations:
+          summary: "Outbox de webhooks salientes acumulando pendientes en {{ $labels.job }}"
+          impact: "Cambios de estado (receta retirada, póliza actualizada) no están llegando a MediCitas — los dos sistemas se están desincronizando."
+          runbook: "Confirmar que medicitas_backend esté sano y alcanzable en medicitas_shared_net. El worker de outbox reintenta solo cada 30s con backoff — no requiere reinicio manual, pero sí investigar si el retraso persiste más de 15 minutos."

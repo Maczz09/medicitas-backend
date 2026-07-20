@@ -1,0 +1,4 @@
+﻿node_modules
+.env
+.git
+src/.wwebjs_auth

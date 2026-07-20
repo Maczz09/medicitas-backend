@@ -109,7 +109,14 @@ const circuitBreakerStateGauge = new client.Gauge({
   registers: [register],
 });
 
-module.exports = { 
+const retryAttemptsCounter = new client.Counter({
+  name: 'medicitas_retry_attempts_total',
+  help: 'Resultado de llamadas S2S con reintento (exitoso_primer_intento | exitoso_tras_reintento | agotado)',
+  labelNames: ['service', 'resultado'],
+  registers: [register],
+});
+
+module.exports = {
   register, 
   httpRequestDuration, 
   httpRequestTotal, 
@@ -125,14 +132,18 @@ module.exports = {
   smsEnviadosCounter,
   outboxPendingGauge,
   dlqSizeGauge,
-  circuitBreakerStateGauge
+  circuitBreakerStateGauge,
+  retryAttemptsCounter
 };
 
 // --- Inicialización para Dashboards ---
 // Esto asegura que Prometheus reporte '0' desde el inicio y Grafana no muestre "No data".
+// circuitBreakerStateGauge YA NO se semilla aquí a mano por servicio: la factory
+// compartida (shared/resilience/circuitBreaker.js) la semilla en el momento en
+// que CADA breaker se construye, para los 12 servicios (antes solo cubría
+// AseguradoraAPI, dejando "no data" para cualquier otro breaker nuevo).
 outboxPendingGauge.set({ service: 'medicitas-workers' }, 0);
 dlqSizeGauge.set({ queue: 'medicitas-dlq' }, 0);
-circuitBreakerStateGauge.set({ service: 'AseguradoraAPI' }, 0);
 pagosMontoTotal.inc({ metodo_pago: 'TARJETA' }, 0);
 pagosCompletadosCounter.inc({ metodo_pago: 'TARJETA' }, 0);
 citasCreadasCounter.inc({ especialidad: 'General' }, 0);

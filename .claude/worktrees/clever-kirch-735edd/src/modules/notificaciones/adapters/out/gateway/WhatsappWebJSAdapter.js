@@ -1,0 +1,268 @@
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode-terminal');
+const qrcodeLib = require('qrcode');
+const logger = require('../../../../../shared/logger/logger');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { maskTelefono } = require('../../../../../shared/infrastructure/pii');
+
+const STATUS_CALLBACK = process.env.APP_PUBLIC_URL
+  ? `${process.env.APP_PUBLIC_URL}/api/v2/webhooks/twilio/status`
+  : null;
+
+const WWEBJS_DATA_PATH = './src/.wwebjs_auth';
+
+// El perfil de Chromium de LocalAuth vive en un volumen bind-mounted que
+// sobrevive a recrear el contenedor. Los archivos SingletonLock/Socket/Cookie
+// identifican la instancia de Chromium por PID/hostname del contenedor
+// ANTERIOR — al recrear el contenedor esos PIDs ya no existen, pero Chromium
+// igual detecta el lock "vivo" y se queda colgado esperando resolverlo,
+// nunca emite el evento 'qr'. Se limpian antes de cada arranque.
+function limpiarLocksHuerfanos(dataPath) {
+  const sessionDir = path.join(dataPath, 'session', 'Default');
+  if (!fs.existsSync(sessionDir)) return;
+
+  for (const nombre of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    const p = path.join(sessionDir, nombre);
+    try {
+      if (fs.existsSync(p) || fs.lstatSync(p, { throwIfNoEntry: false })) {
+        fs.rmSync(p, { force: true });
+        logger.warn({ archivo: nombre }, '[WA-Adapter] Lock huérfano de Chromium eliminado antes de arrancar');
+      }
+    } catch {
+      // No debe impedir el arranque si el archivo ya no existe o no se puede borrar
+    }
+  }
+}
+
+function fmtWhatsApp(tel) {
+  const digits = tel.replace(/\D/g, '');
+  // Si ya trae el código de país de Perú (51), no lo duplicar; si no, anteponerlo.
+  const e164   = digits.startsWith('51') ? digits : `51${digits}`;
+  return `${e164}@c.us`; // Formato requerido por whatsapp-web.js
+}
+
+// Chromium/whatsapp-web.js pueden colgarse en sendMessage sin resolver la
+// promesa. Sin un timeout, el consumer (prefetch 5) quedaría bloqueado
+// indefinidamente en ese await, atascando toda la cola de notificaciones.
+const WA_SEND_TIMEOUT_MS = parseInt(process.env.WA_SEND_TIMEOUT_MS || '20000');
+function conTimeout(promesa, ms, etiqueta) {
+  return Promise.race([
+    promesa,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout de ${ms}ms en ${etiqueta}`)), ms)),
+  ]);
+}
+
+class WhatsAppNotLinkedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'WhatsAppNotLinkedError';
+  }
+}
+
+class WhatsappWebJSAdapter {
+  static instance = null;
+
+  constructor(onReadyCallback) {
+    if (WhatsappWebJSAdapter.instance) {
+      return WhatsappWebJSAdapter.instance;
+    }
+    WhatsappWebJSAdapter.instance = this;
+
+    this.onReadyCallback = onReadyCallback;
+    this.initClient();
+    this._registrarApagadoGracioso();
+  }
+
+  // Docker manda SIGTERM en `restart`/`stop` y espera ~10s antes de matar el
+  // proceso con SIGKILL. Sin este handler, cada reinicio del contenedor
+  // mataba a Chromium a mitad de una escritura de su perfil (IndexedDB/
+  // LevelDB no son a prueba de crashes) — eso corrompía la sesión vinculada
+  // y forzaba escanear el QR de nuevo en cada rebuild, además de dejar los
+  // locks huérfanos que limpiarLocksHuerfanos() tiene que resolver después.
+  _registrarApagadoGracioso() {
+    if (WhatsappWebJSAdapter._shutdownRegistrado) return;
+    WhatsappWebJSAdapter._shutdownRegistrado = true;
+
+    const cerrar = async (señal) => {
+      logger.info({ señal }, '[WA-Adapter] Cerrando Chromium de forma ordenada antes de salir...');
+      try {
+        if (this.client) await this.client.destroy();
+      } catch (e) {
+        logger.warn({ error: e.message }, '[WA-Adapter] Error cerrando Chromium en apagado gracioso');
+      } finally {
+        process.exit(0);
+      }
+    };
+
+    process.on('SIGTERM', () => cerrar('SIGTERM'));
+    process.on('SIGINT', () => cerrar('SIGINT'));
+  }
+
+  initClient() {
+    logger.info('[WA-Adapter] Inicializando whatsapp-web.js en modo headless...');
+    this.isReady = false;
+    this.currentQrDataUri = null;
+    this.qrGeneratedAt = null;
+
+    limpiarLocksHuerfanos(WWEBJS_DATA_PATH);
+
+    this.client = new Client({
+      authStrategy: new LocalAuth({ dataPath: WWEBJS_DATA_PATH }),
+      puppeteer: {
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: [
+          '--no-sandbox', 
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu'
+        ]
+      }
+    });
+
+    this.client.on('qr', async (qr) => {
+      // Chromium arrancó y llegó hasta WhatsApp Web → el perfil está sano;
+      // se resetea el contador de fallos de inicialización.
+      this._intentosInit = 0;
+      this.isReady = false;
+      this.qrGeneratedAt = Date.now();
+      try {
+        this.currentQrDataUri = await qrcodeLib.toDataURL(qr);
+      } catch (err) {
+        logger.error({ err: err.message }, '[WA-Adapter] Error generando QR Base64');
+      }
+      logger.info('[WA-Adapter] 🚨 ESCANEA ESTE CÓDIGO QR CON TU WHATSAPP 🚨');
+      qrcode.generate(qr, { small: true });
+    });
+
+    this.client.on('ready', () => {
+      this._intentosInit = 0;
+      this.isReady = true;
+      this.currentQrDataUri = null;
+      this.qrGeneratedAt = null;
+      logger.info('[WA-Adapter] ✨ ¡Cliente de WhatsApp Web está LISTO! ✨');
+      if (this.onReadyCallback) {
+        this.onReadyCallback().catch(e => logger.error({ err: e.message }, 'Error en callback onReady'));
+      }
+    });
+
+    this.client.on('disconnected', (reason) => {
+      this.isReady = false;
+      this.currentQrDataUri = null;
+      this.qrGeneratedAt = null;
+      logger.warn({ reason }, '[WA-Adapter] Cliente desconectado');
+    });
+
+    this.client.on('message_ack', async (msg, ack) => {
+      if (!STATUS_CALLBACK) return;
+      
+      let MessageStatus = 'sent';
+      if (ack === 2) MessageStatus = 'delivered';
+      if (ack === 3) MessageStatus = 'read';
+
+      try {
+        await axios.post(STATUS_CALLBACK, {
+          MessageSid: msg.id.id,
+          MessageStatus: MessageStatus,
+        }, {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+        logger.info({ sid: msg.id.id, status: MessageStatus }, '[WA-Adapter] ACK reportado al webhook');
+      } catch (err) {
+        logger.warn({ error: err.message }, '[WA-Adapter] Error reportando ACK al webhook local');
+      }
+    });
+
+    this.client.initialize().catch(async (e) => {
+      this._intentosInit = (this._intentosInit || 0) + 1;
+      logger.error(
+        { error: e.message, intento: this._intentosInit },
+        '[WA-Adapter] Error al inicializar whatsapp-web.js'
+      );
+
+      // Cerrar el Chromium zombi del intento fallido antes de reintentar —
+      // si queda vivo, el siguiente intento choca contra su propio lock.
+      try { await this.client.destroy(); } catch { /* ya estaba muerto */ }
+
+      // Escalamiento de auto-recuperación:
+      //   Intento 1 falla → reintentar (limpiarLocksHuerfanos cubre locks
+      //     huérfanos de un contenedor anterior).
+      //   Intento 2 falla → el perfil está corrupto MÁS ALLÁ de los locks
+      //     (LevelDB/IndexedDB dañadas por un apagado no gracioso de
+      //     Docker/Windows). Sin esto, el retry giraba cada 5s contra la
+      //     misma carpeta rota para siempre y solo se salía borrándola a
+      //     mano. Perder la vinculación (re-escanear el QR) es preferible a
+      //     un servicio de notificaciones muerto hasta intervención manual.
+      if (this._intentosInit >= 2) {
+        this._borrarSesionCorrupta();
+      }
+
+      logger.warn(`[WA-Adapter] Reintentando inicialización en 5s (fallo #${this._intentosInit})...`);
+      setTimeout(() => this.initClient(), 5000);
+    });
+  }
+
+  _borrarSesionCorrupta() {
+    try {
+      const authPath = path.resolve(WWEBJS_DATA_PATH);
+      if (fs.existsSync(authPath)) {
+        fs.rmSync(authPath, { recursive: true, force: true });
+        logger.warn('[WA-Adapter] ⚠️ Sesión corrupta eliminada automáticamente — se generará un QR NUEVO para re-vincular.');
+      }
+    } catch (err) {
+      logger.error({ error: err.message }, '[WA-Adapter] No se pudo borrar la sesión corrupta');
+    }
+  }
+
+  async unlink() {
+    if (this.client) {
+      logger.info('[WA-Adapter] Desvinculando WhatsApp...');
+      try {
+        // En lugar de llamar a logout() (que causa crashes por frames detached en puppeteer),
+        // destruimos el cliente para cerrar el navegador y luego borramos la sesión de disco.
+        await this.client.destroy();
+      } catch (e) {
+        logger.warn({ error: e.message }, '[WA-Adapter] Error al cerrar navegador');
+      }
+
+      const authPath = path.resolve(WWEBJS_DATA_PATH);
+      if (fs.existsSync(authPath)) {
+        fs.rmSync(authPath, { recursive: true, force: true });
+        logger.info('[WA-Adapter] Sesión borrada exitosamente.');
+      }
+
+      this.client = null;
+      this.isReady = false;
+      this.currentQrDataUri = null;
+      this.qrGeneratedAt = null;
+      
+      // Iniciar de nuevo para tener un nuevo código QR
+      setTimeout(() => this.initClient(), 2000);
+    }
+  }
+
+  async enviar({ telefono, mensaje, idMensaje }) {
+    if (!this.isReady || !this.client || !this.client.info) {
+      logger.warn('[WA-Adapter] Cliente no listo. Encolando mensaje...');
+      throw new WhatsAppNotLinkedError('WhatsApp Web no está vinculado o no está listo.');
+    }
+
+    const destino = fmtWhatsApp(telefono);
+    const destinoMask = maskTelefono(telefono);
+
+    try {
+      const msg = await conTimeout(this.client.sendMessage(destino, mensaje), WA_SEND_TIMEOUT_MS, 'WhatsApp.sendMessage');
+      logger.info({ sid: msg.id.id, destino: destinoMask, idMensaje }, '[WA-Adapter] Mensaje enviado por whatsapp-web.js');
+      return { exitoso: true, referencia: msg.id.id };
+    } catch (e) {
+      logger.error({ error: e.message, destino: destinoMask }, '[WA-Adapter] Error al enviar mensaje');
+      throw e; // Permitir que el consumer haga retry
+    }
+  }
+}
+
+module.exports = { WhatsappWebJSAdapter, WhatsAppNotLinkedError };

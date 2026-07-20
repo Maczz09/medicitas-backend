@@ -17,7 +17,11 @@ async function connect() {
   await channel.assertExchange('medicitas.events', 'topic', { durable: true });
 
   // Facturacion
-  await channel.assertQueue('q.facturacion', { durable: true });
+  await channel.assertQueue('q.facturacion.dlq', { durable: true });
+  await channel.assertQueue('q.facturacion', {
+    durable: true,
+    arguments: { 'x-dead-letter-exchange': '', 'x-dead-letter-routing-key': 'q.facturacion.dlq' }
+  });
   await channel.bindQueue('q.facturacion', 'medicitas.events', 'event.PagoAprobado');
 
   // Auditoria

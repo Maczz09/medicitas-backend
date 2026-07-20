@@ -4,5 +4,7 @@
 // Sin nada que mantenga vivo el event loop, el script terminaba solo al
 // llegar al final — PM2 lo reiniciaba en loop infinito (autorestart) cada
 // pocos segundos. El intervalo de abajo no hace nada; solo evita ese loop.
-console.log('[Worker] Tolerancia cron iniciado (cada minuto).');
+const logger = require('../src/shared/logger/logger');
+
+logger.info('[Worker] Tolerancia cron iniciado (cada minuto).');
 setInterval(() => {}, 3600_000);

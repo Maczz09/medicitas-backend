@@ -17,6 +17,14 @@ const pool = mysql.createPool({
   port: process.env.MYSQL_PORT || 3306,
   user: process.env.MYSQL_USER,
   password: process.env.MYSQL_PASSWORD,
+  // Explícito por buena práctica (no confiar en el default de mysql2 para
+  // la negociación de charset de la CONEXIÓN, aunque las columnas ya sean
+  // utf8mb4). Nota: un caso de nombres con tilde/ñ guardados como "Mar<?>a"
+  // se investigó pensando que era esto — la causa real resultó ser un curl
+  // de Windows/MinGW pasando mal UTF-8 por argv en un script de prueba, no
+  // este pool (verificado: los mismos INSERT desde Node directo, con o sin
+  // esta opción, siempre guardaron los acentos correctamente).
+  charset: 'utf8mb4',
   waitForConnections: true,
   connectionLimit: parseInt(process.env.DB_POOL_SIZE || '10'),
   queueLimit: 0,

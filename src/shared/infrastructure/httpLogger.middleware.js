@@ -5,9 +5,12 @@ const logger = require('../logger/logger');
 // el tráfico, no solo los errores. Cada línea comparte el correlationId con el
 // resto de logs de esa petición, así se rastrea el flujo completo.
 //
-// Se DESACTIVA en modo carga (LOAD_TEST_MODE=true) para no inundar Loki con
-// >1000 líneas/s durante las pruebas de volumen — ahí importan los números de
-// k6, no el log de cada request. Se puede forzar con LOG_HTTP=true/false.
+// Precedencia: LOG_HTTP gana siempre; si no está, LOAD_TEST_MODE=true lo apaga.
+// docker-compose.loadtest.yml setea LOG_HTTP=true, así que EN CARGA TAMBIÉN SE
+// LOGUEA: el apagado automático dejaba las pruebas k6 sin una sola petición en
+// Loki, que es precisamente la evidencia de observabilidad que hay que mostrar.
+// El apagado sigue disponible (LOG_HTTP=false) para corridas de volumen extremo
+// donde >1000 líneas/s retrasan la ingesta de Loki.
 const HABILITADO =
   process.env.LOG_HTTP === 'true' ||
   (process.env.LOG_HTTP !== 'false' && process.env.LOAD_TEST_MODE !== 'true');

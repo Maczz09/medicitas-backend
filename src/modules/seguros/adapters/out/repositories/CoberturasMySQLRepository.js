@@ -45,11 +45,17 @@ class CoberturasMySQLRepository {
       // PolizasCacheRepository.obtenerLoteParaReconciliar() en
       // seguros-fallback-service.
       const limiteSeguro = Number.isInteger(Number(limit)) ? Number(limit) : 20;
+      // Newest-first a propósito: la validación que un recepcionista ACABA de
+      // hacer (y está mirando en pantalla) es la que más se beneficia de una
+      // reconciliación instantánea al recuperarse la aseguradora. Las filas
+      // fallback viejas no las está mirando nadie en vivo — se reconcilian
+      // después, en los ciclos siguientes del backstop. Con ASC, una fila
+      // recién creada quedaba al final de un backlog grande y tardaba minutos.
       const [rows] = await conn.execute(
         `SELECT id, id_paciente, id_aseguradora, numero_poliza, tipo_consulta, correlation_id
          FROM svc_seg.validaciones_cobertura
-         WHERE estado_cobertura = 'PENDIENTE'
-         ORDER BY created_at ASC
+         WHERE estado_cobertura = 'PENDIENTE' OR es_fallback = 1
+         ORDER BY created_at DESC
          LIMIT ${limiteSeguro}`
       );
       return rows.map((r) => ({
@@ -65,25 +71,27 @@ class CoberturasMySQLRepository {
     }
   }
 
-  async actualizarResultado(id, resultado) {
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.execute(
-        `UPDATE svc_seg.validaciones_cobertura
-         SET estado_cobertura = ?, porcentaje_cobertura = ?,
-             codigo_autorizacion = ?, vigencia = ?, es_fallback = 0
-         WHERE id = ? AND estado_cobertura = 'PENDIENTE'`,
-        [
-          resultado.estadoCobertura,
-          resultado.porcentajeCobertura,
-          resultado.codigoAutorizacion,
-          resultado.vigencia,
-          id,
-        ]
-      );
-    } finally {
-      conn.release();
-    }
+  // Recibe conexión activa de la TX del caller — misma convención que save()
+  // — para que la corrección y la publicación del evento de dominio commiteen
+  // atómicamente (ver recovery replay en seguros.routes.js). Devuelve
+  // affectedRows (mismo criterio que actualizarPorId/actualizarPorPoliza) para
+  // que el caller detecte si OTRO worker del clúster ya reconcilió esta fila
+  // primero, y evite publicar un evento de dominio duplicado.
+  async actualizarResultado(id, resultado, connection) {
+    const [result] = await connection.execute(
+      `UPDATE svc_seg.validaciones_cobertura
+       SET estado_cobertura = ?, porcentaje_cobertura = ?,
+           codigo_autorizacion = ?, vigencia = ?, es_fallback = 0
+       WHERE id = ? AND (estado_cobertura = 'PENDIENTE' OR es_fallback = 1)`,
+      [
+        resultado.estadoCobertura,
+        resultado.porcentajeCobertura,
+        resultado.codigoAutorizacion,
+        resultado.vigencia,
+        id,
+      ]
+    );
+    return result.affectedRows;
   }
 
   // Actualiza una validación puntual por id — usado por el webhook de aseguradora

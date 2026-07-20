@@ -1,0 +1,56 @@
+const axios = require('axios');
+const { DomainError } = require('../../../../../shared/domain/errors');
+const { conReintentos } = require('../../../../../shared/resilience/retryConBackoffJitter');
+
+class CitaHttpAdapter {
+  constructor() {
+    this.baseUrl = process.env.APP_INTERNAL_BASE_URL || 'http://localhost:3000';
+    // Token interno para llamadas entre módulos
+    this.internalToken = process.env.INTERNAL_SERVICE_TOKEN?.trim();
+  }
+
+  async completarCita(idCita) {
+    const { data } = await conReintentos(() => axios.patch(
+      `${this.baseUrl}/api/v2/citas/${idCita}/completar`,
+      {},
+      {
+        headers: { Authorization: `Bearer ${this.internalToken}` },
+        timeout: 3000,
+      }
+    ));
+    return data;
+  }
+
+  async obtenerEstadoCita(idCita) {
+    try {
+      const { data } = await conReintentos(() => axios.get(
+        `${this.baseUrl}/api/v2/citas/${idCita}`,
+        {
+          headers: { Authorization: `Bearer ${this.internalToken}` },
+          timeout: 3000,
+        }
+      ));
+      // El endpoint puede devolver { data: {...} } o el objeto plano.
+      const cita = data.data ? data.data : data;
+      return { estado: cita.estado, idMedico: cita.idMedico ?? cita.id_medico ?? null };
+
+    } catch (error) {
+      console.error('ERROR EN AXIOS CitaHttpAdapter:', error.message);
+      if (error.response) console.error('Data:', error.response.data);
+      
+      if (error.response?.status === 404) {
+        return null; // La cita no existe; el use case lanzará el DomainError correspondiente
+      }
+      if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+        throw new DomainError('SERVICIO_CITAS_NO_DISPONIBLE', 'Servicio de Citas no responde. Intente de nuevo en unos momentos.', 503);
+      }
+      if (error.code === 'ECONNREFUSED') {
+        throw new DomainError('SERVICIO_CITAS_NO_DISPONIBLE', 'Servicio de Citas no disponible.', 503);
+      }
+      // Error inesperado: loguear y relanzar como error interno
+      throw new DomainError('ERROR_INTERNO_HCL', 'Error al consultar el estado de la cita.', 500);
+    }
+  }
+}
+
+module.exports = { CitaHttpAdapter };

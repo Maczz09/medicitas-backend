@@ -76,6 +76,17 @@
           "queryType": "range"
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Reintentos S2S por Servicio (Resiliencia)",
+      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(medicitas_retry_attempts_total[5m])) by (service, resultado)",
+          "legendFormat": "{{service}} — {{resultado}}"
+        }
+      ]
     }
   ],
   "schemaVersion": 38,

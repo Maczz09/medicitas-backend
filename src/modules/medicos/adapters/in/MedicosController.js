@@ -18,8 +18,10 @@ const authUseCases = new AuthUseCases(authRepository);
 
 exports.getAll = async (req, res, next) => {
   try {
-    const data = await medicosUseCases.listMedicos();
-    res.status(200).json({ data, correlationId: req.correlationId });
+    const { page, limit, q } = req.query;
+    const usaFiltros = page !== undefined || limit !== undefined || q !== undefined;
+    const { data, meta } = await medicosUseCases.listMedicos(usaFiltros ? { page, limit, q } : undefined);
+    res.status(200).json({ data, meta, correlationId: req.correlationId });
   } catch (err) {
     next(err);
   }

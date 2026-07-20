@@ -12,14 +12,24 @@ groups:
           impact: "Los pacientes están experimentando demoras al navegar o pagar. Conversión en riesgo."
           runbook: "Revisar logs en Loki filtrando por durationMs > 2000. Escalar el número de workers si el CPU está saturado."
 
+      # Mide SOLO errores de servidor (5xx). Antes usaba http_request_errors_total,
+      # que por diseño cuenta 4xx Y 5xx (ver src/config/metrics.js) — y eso hacía
+      # que la alerta viviera encendida: un GET a la historia clínica de un
+      # paciente sin expediente responde 404, que es la respuesta de negocio
+      # CORRECTA, no una falla. En una corrida de carga normal esos 404 legítimos
+      # sumaban ~7.400 y dejaban la tasa en 9%, disparando una alerta crítica
+      # permanente (alert fatigue: si siempre está roja, nadie la mira).
+      # Disponibilidad = (respuestas no-5xx / total): un 4xx significa que el
+      # cliente pidió algo inválido o inexistente; el servicio funcionó bien.
+      # El contador de 4xx sigue existiendo para analizar mal uso de la API.
       - alert: HighErrorRate
-        expr: sum(rate(http_request_errors_total{job="medicitas-backend"}[5m])) / sum(rate(http_requests_total{job="medicitas-backend"}[5m])) > 0.05
+        expr: sum(rate(http_requests_total{job="medicitas-backend", status_code=~"5.."}[5m])) / sum(rate(http_requests_total{job="medicitas-backend"}[5m])) > 0.05
         for: 1m
         labels:
           severity: critical
           service: backend
         annotations:
-          summary: "Tasa de error superior al 5%"
+          summary: "Tasa de error 5xx superior al 5%"
           impact: "Pérdida de transacciones o agendamiento fallido. Impacto directo a ingresos."
           runbook: "Revisar Loki buscando errorCode != null. Validar si la base de datos está rechazando conexiones."
 
@@ -33,6 +43,26 @@ groups:
           summary: "Circuit Breaker Abierto para {{ $labels.service }}"
           impact: "Servicio degradado. Fallback activo. Posible pérdida de consistencia con externos."
           runbook: "El servicio externo está fallando. Validar portal del proveedor (Aseguradora/Farmacia). No reiniciar el backend, el sistema se recuperará solo (Half-Open)."
+
+      # Correlaciona HighLatencyP95 con CircuitBreakerOpen: con el horario de
+      # reintentos fijo (3s/5s/8s + timeout exponencial 2s/4s/8s) es ESPERADO
+      # que la latencia suba cuando un adaptador S2S está reintentando contra
+      # una dependencia caída — esta alerta distingue esa causa conocida de
+      # una lentitud genérica sin explicación (que HighLatencyP95 sola no
+      # puede distinguir). `and on()` es un booleano sin cruce de labels: se
+      # dispara solo si AMBAS condiciones son ciertas a la vez.
+      - alert: HighLatencyPorCircuitBreakerAbierto
+        expr: |
+          (histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="medicitas-backend"}[5m])) by (le)) > 2.0)
+          and on() (count(medicitas_circuit_breaker_state == 1) > 0)
+        for: 1m
+        labels:
+          severity: warning
+          service: integracion
+        annotations:
+          summary: "Latencia alta CORRELACIONADA con un Circuit Breaker abierto"
+          impact: "La demora no es un problema del backend en sí — un servicio S2S está degradado y el sistema está esperando timeouts/reintentos antes de caer al fallback."
+          runbook: "Revisar medicitas_circuit_breaker_state en Grafana (panel 'Estado de Circuit Breaker') para identificar qué servicio está abierto. Misma causa raíz que CircuitBreakerOpen — evidencia de que el patrón de resiliencia funciona como se diseñó, no un incidente nuevo."
 
       - alert: OutboxSaturation
         expr: medicitas_outbox_pending_messages > 100
@@ -58,14 +88,16 @@ groups:
           impact: "MediCitas no puede validar coberturas o despachar recetas — el Circuit Breaker debería abrir y activar fallback, pero el servicio real está totalmente inalcanzable."
           runbook: "Verificar `docker ps` del stack de {{ $labels.job }} y sus logs. Confirmar que el contenedor no quedó en crash-loop tras un deploy."
 
+      # Solo 5xx, por el mismo motivo que HighErrorRate (arriba): un 4xx del
+      # externo es una respuesta válida a un payload inválido, no una caída suya.
       - alert: HighErrorRateServicioExterno
-        expr: sum by (job) (rate(http_request_errors_total{job=~"farmacia-api|aseguradora-api"}[5m])) / sum by (job) (rate(http_requests_total{job=~"farmacia-api|aseguradora-api"}[5m])) > 0.05
+        expr: sum by (job) (rate(http_requests_total{job=~"farmacia-api|aseguradora-api", status_code=~"5.."}[5m])) / sum by (job) (rate(http_requests_total{job=~"farmacia-api|aseguradora-api"}[5m])) > 0.05
         for: 2m
         labels:
           severity: warning
           service: integracion
         annotations:
-          summary: "Tasa de error superior al 5% en {{ $labels.job }}"
+          summary: "Tasa de error 5xx superior al 5% en {{ $labels.job }}"
           impact: "Validaciones de cobertura o despachos de receta fallando — riesgo de degradar la experiencia en recepción/farmacia."
           runbook: "Revisar Loki con {app=\"{{ $labels.job }}\"}. Si es 5xx, revisar la conexión a su base de datos; si es 4xx, revisar el contrato del payload enviado por MediCitas."
 

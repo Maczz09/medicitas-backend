@@ -1,0 +1,325 @@
+version: '3.9'
+
+services:
+
+  # ─── MYSQL ────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: medicitas_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3310:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - medicitas_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── REDIS ────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: medicitas_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - medicitas_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── RABBITMQ ─────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: medicitas_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: medicitas
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - medicitas_net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ─── BACKEND (Monolito Modular) ───────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medicitas_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: America/Lima
+      NODE_ENV: ${NODE_ENV}
+      # Logs estructurados → Loki (Grafana). Activa pino-loki aunque NODE_ENV=development.
+      LOKI_HOST: http://loki:3100
+      LOKI_APP_LABEL: medicitas-backend
+      # Tracing distribuido → Jaeger
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_SERVICE_NAME: medicitas-backend
+      PORT: 3000
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/medicitas
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      ASEGURADORA_API_URL:  ${ASEGURADORA_API_URL}
+      ASEGURADORA_API_KEY:  ${ASEGURADORA_API_KEY}
+      USE_MOCK_SEGURO:      ${USE_MOCK_SEGURO:-false}
+      SEGUROS_FALLBACK_URL: ${SEGUROS_FALLBACK_URL}
+      FARMACIA_API_URL:     ${FARMACIA_API_URL}
+      SMS_API_URL:          ${SMS_API_URL}
+      SMS_API_KEY:          ${SMS_API_KEY}
+      # Resiliencia
+      HTTP_TIMEOUT_MS:      ${HTTP_TIMEOUT_MS:-3000}
+      CB_TIMEOUT_MS:        ${CB_TIMEOUT_MS:-3500}
+      CB_ERROR_THRESHOLD:   ${CB_ERROR_THRESHOLD:-50}
+      CB_RESET_TIMEOUT_MS:  ${CB_RESET_TIMEOUT_MS:-30000}
+      RETRY_MAX_INTENTOS:   ${RETRY_MAX_INTENTOS:-3}
+      RETRY_BASE_MS:        ${RETRY_BASE_MS:-200}
+      RETRY_MAX_MS:         ${RETRY_MAX_MS:-2000}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - medicitas_net
+      - medicitas_shared_net
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    volumes:
+      # Volúmenes para desarrollo (hot-reloading)
+      - ./src:/app/src
+      - comprobantes_storage:/app/storage/comprobantes
+      - recetas_storage:/app/storage/recetas-contingencia
+
+  # ─── WORKERS (PM2 administra Outbox + Tolerancia) ─────────
+  workers:
+    build:
+      context: .
+      dockerfile: Dockerfile.workers
+    container_name: medicitas_workers
+    restart: unless-stopped
+    environment:
+      TZ: America/Lima
+      NODE_ENV: ${NODE_ENV}
+      # Logs estructurados → Loki (Grafana)
+      LOKI_HOST: http://loki:3100
+      LOKI_APP_LABEL: medicitas-workers
+      # Tracing distribuido → Jaeger
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_SERVICE_NAME: medicitas-workers
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/medicitas
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_MESSAGING_SERVICE_SID: ${TWILIO_MESSAGING_SERVICE_SID}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - medicitas_net
+    volumes:
+      - ./workers:/app/workers
+      - ./src:/app/src
+
+  # ─── NGINX (API Gateway + Reverse Proxy) ──────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: medicitas_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+    networks:
+      - medicitas_net
+
+  # ─── PROMETHEUS ───────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: medicitas_prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+    networks:
+      - medicitas_net
+      # Permite scrapear farmacia-api y aseguradora-prosalud-api, que corren
+      # en stacks Docker propios y solo son alcanzables por esta red puente.
+      - medicitas_shared_net
+
+  # ─── ALERTMANAGER ─────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: medicitas_alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - medicitas_net
+  # ─── LOKI ─────────────────────────────────────────────────
+  loki:
+    # 2.9.4 tenía un decoder JSON de /loki/api/v1/push demasiado estricto para
+    # el formato que envía pino-loki 3.x — corrompía el batch completo con
+    # "unmarshalerDecoder..." y se perdían los logs. 3.7.x lo acepta bien.
+    image: grafana/loki:3.7.3
+    container_name: medicitas_loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - medicitas_net
+      # Red compartida: permite que farmacia-api y aseguradora-api envíen
+      # sus logs estructurados (pino-loki) directamente a http://loki:3100
+      - medicitas_shared_net
+
+  # ─── JAEGER (Tracing distribuido) ──────────────────────────
+  # all-in-one: collector + query + UI + almacenamiento en memoria.
+  # Suficiente para desarrollo/demo — no persiste entre reinicios.
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: medicitas_jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - medicitas_net
+      # Red compartida: farmacia-api y aseguradora-api envían spans aquí
+      # para que las llamadas S2S aparezcan en el mismo trace distribuido.
+      - medicitas_shared_net
+
+  # ─── GRAFANA ──────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: medicitas_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: http://localhost:3001
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - medicitas_net
+
+  # ─── OWASP ZAP (Security Scanner) ────────────────────────
+  # Uso: docker compose run --rm zap para ejecutar un escaneo baseline
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: medicitas_zap
+    profiles:
+      - security
+    command: >
+      zap-baseline.py
+      -t http://nginx:80
+      -r /zap/wrk/zap-report.html
+      -J /zap/wrk/zap-report.json
+      -l WARN
+    volumes:
+      - ./reports/zap:/zap/wrk:rw
+    depends_on:
+      - nginx
+    networks:
+      - medicitas_net
+
+  # ─── AUTOHEAL (Monitor de contenedores) ──────────────────
+  autoheal:
+    image: willfarrell/autoheal
+    container_name: medicitas_autoheal
+    restart: always
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=all
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  mysql_data:
+  redis_data:
+  rabbitmq_data:
+  comprobantes_storage:
+  recetas_storage:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  medicitas_net:
+    driver: bridge
+  medicitas_shared_net:
+    external: true

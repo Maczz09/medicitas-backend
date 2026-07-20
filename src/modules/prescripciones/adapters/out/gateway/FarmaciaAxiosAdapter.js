@@ -1,8 +1,9 @@
 const axios = require('axios');
 const http  = require('http');
 const https = require('https');
-const { crearCircuitBreakerFarmacia } = require('./circuit-breaker/circuitBreakerFarmaciaConfig');
+const { crearCircuitBreaker } = require('../../../../../shared/resilience/circuitBreaker');
 const { conRetryYFallback } = require('../../../../../shared/resilience/retryConBackoffJitter');
+const { obtenerTimeoutParaIntento } = require('../../../../../shared/resilience/config');
 const logger = require('../../../../../shared/logger/logger');
 
 /**
@@ -18,43 +19,55 @@ const logger = require('../../../../../shared/logger/logger');
  *
  * Separar el origen permite al IniciarDespachoUseCase elegir entre
  * RECHAZADA_POR_STOCK y RECHAZADA_POR_VALIDACION sin lógica en el adaptador.
+ *
+ * IMPORTANTE — esta clase se instancia DOS VECES en el proceso: una en
+ * server.js (consumer real de RabbitMQ, el path que efectivamente despacha
+ * recetas) y otra en prescripciones.routes.js (endpoint manual de
+ * reintento). Cada instancia tiene su PROPIO circuit breaker — por eso el
+ * constructor exige un nombreServicio explícito y distinto en cada call
+ * site: si ambas reportaran el mismo nombre al gauge de Prometheus, se
+ * pisarían entre sí y Grafana podría mostrar "sano" mientras una de las dos
+ * rutas está realmente degradada.
  */
 class FarmaciaAxiosAdapter {
-  constructor() {
-    // Bulkhead: agente HTTP propio con maxSockets acotado — aísla este adaptador
-    // del pool global de Node.js para que una caída de farmacia-api no agote
-    // los sockets disponibles para el resto de llamadas salientes del proceso.
+  constructor({ nombreServicio = 'FarmaciaAPI' } = {}) {
+    // Bulkhead: agente HTTP propio con maxSockets acotado — aísla este
+    // adaptador del pool global de Node.js para que una caída de
+    // farmacia-api no agote los sockets disponibles para el resto de
+    // llamadas salientes del proceso. Sin timeout fijo: va por-request,
+    // exponencial por intento (ver _llamadaReal).
     this.client = axios.create({
-      timeout: parseInt(process.env.CB_TIMEOUT_MS_FARMACIA || '5000') - 500,
       headers: { Authorization: `Bearer ${process.env.FARMACIA_API_KEY}` },
       validateStatus: () => true,
       httpAgent:  new http.Agent({ maxSockets: 20 }),
       httpsAgent: new https.Agent({ maxSockets: 20 }),
     });
 
-    this.breaker = crearCircuitBreakerFarmacia(this._llamadaReal.bind(this));
-    this._onRecuperacion = null;
-    this.breaker.on('close', () => this._dispararRecuperacion());
-  }
-
-  registrarRecuperacion(fn) {
-    this._onRecuperacion = fn;
-  }
-
-  async _dispararRecuperacion() {
-    if (!this._onRecuperacion) return;
-    try {
-      await this._onRecuperacion();
-    } catch (err) {
-      logger.error({ err }, '[FarmaciaAxiosAdapter] Error en recovery replay tras cierre del circuito');
-    }
+    this.nombreServicio = nombreServicio;
+    const { breaker, registrarRecuperacion } = crearCircuitBreaker({
+      nombreServicio,
+      // Literal fijo a propósito, NO nombreServicio: esta clase tiene 2
+      // instancias con nombreServicio distinto ('FarmaciaAPI-Despacho' /
+      // '-Reintento') para no pisarse en el gauge de Prometheus — pero para
+      // el usuario final ambas son "el servicio de Farmacia", un solo nombre
+      // legible sin importar cuál instancia abrió el circuito.
+      servicioAfectado: 'Farmacia',
+      accion: this._llamadaReal.bind(this),
+      // Errores de configuración (400/401) NO abren el circuito — se
+      // propagan hacia el caller pero no cuentan como falla de disponibilidad.
+      errorFilter: (err) => err.esErrorDeConfiguracion === true,
+    });
+    this.breaker = breaker;
+    // Delega directo a la factory — antes cada adaptador reimplementaba su
+    // propio _onRecuperacion/_dispararRecuperacion encima de breaker.on('close').
+    this.registrarRecuperacion = registrarRecuperacion;
   }
 
   /**
    * Punto de entrada público. Garantiza que NUNCA lanza:
    * - Si breaker.fire() resuelve → forwarda la respuesta.
-   * - Fallos transitorios (timeout, 5xx) → retry con backoff exponencial + Full
-   *   Jitter (misma pirámide de resiliencia que AseguradoraAxiosAdapter).
+   * - Fallos transitorios (timeout, 5xx) → retry con horario fijo 3s/5s/8s
+   *   (misma pirámide de resiliencia que AseguradoraAxiosAdapter).
    * - Agotados los reintentos o CB abierto → fallback de tipo TRANSPORTE.
    *
    * Reintentar el POST es seguro: farmacia-api deduplica por referenciaDespacho
@@ -64,23 +77,21 @@ class FarmaciaAxiosAdapter {
     const datos = { idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad };
 
     return conRetryYFallback(
-      () => this.breaker.fire(datos),
+      (intento) => this.breaker.fire(datos, intento),
       () => this.breaker.opened,
       this._respuestaFallbackTransporte(),
-      {
-        maxIntentos: parseInt(process.env.RETRY_MAX_INTENTOS || '3'),
-        baseMs:      parseInt(process.env.RETRY_BASE_MS      || '200'),
-        maxMs:       parseInt(process.env.RETRY_MAX_MS       || '2000'),
-      },
+      { nombreServicio: this.nombreServicio },
       logger,
     );
   }
 
   /**
-   * Llamada HTTP real — envuelta por el Circuit Breaker.
-   * La URL completa viene de la variable de entorno (incluyendo la ruta del endpoint).
+   * Llamada HTTP real — envuelta por el Circuit Breaker. `intento` (1-based)
+   * lo reenvía opossum desde breaker.fire(datos, intento) — arma el timeout
+   * exponencial de este intento específico. La URL completa viene de la
+   * variable de entorno (incluyendo la ruta del endpoint).
    */
-  async _llamadaReal({ idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad }) {
+  async _llamadaReal({ idReceta, farmaciaId, idEncuentroClinico, medicamento, dosis, cantidad }, intento) {
     logger.info({ idReceta, farmaciaId }, '[FarmaciaAxiosAdapter] Enviando receta a farmacia-api real');
 
     const response = await this.client.post(process.env.FARMACIA_API_URL, {
@@ -90,6 +101,8 @@ class FarmaciaAxiosAdapter {
       medicamento,
       dosis,
       cantidad,
+    }, {
+      timeout: obtenerTimeoutParaIntento(intento),
     });
 
     // 200: respuesta de negocio clara — aceptada o rechazada por stock.

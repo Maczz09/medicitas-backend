@@ -21,9 +21,12 @@ const ConsultarRecetasContingenciaUseCase = require('../application/use-cases/Co
 
 const dbPool = require('../../../config/database');
 
+// nombreServicio distinto del de server.js (preGateway) a propósito: son 2
+// instancias con 2 circuit breakers independientes — ver el comentario en
+// FarmaciaAxiosAdapter sobre por qué NO pueden compartir nombre en el gauge.
 const gateway = process.env.USE_MOCK_FARMACIA === 'true'
   ? new FarmaciaMockAdapter()
-  : new FarmaciaAxiosAdapter();
+  : new FarmaciaAxiosAdapter({ nombreServicio: 'FarmaciaAPI-Reintento' });
 
 const repo = new DespachosMySQLRepository();
 const eventPublisher = new OutboxEventPublisher();
@@ -139,16 +142,43 @@ router.get('/', verifyToken, requireRole('Médico', 'Recepcionista', 'Auditor'),
     const offset = (page - 1) * limit;
     const estado = req.query.estado;
     const soloContingencia = req.query.contingencia === 'true';
+    const q = req.query.q ? req.query.q.trim() : '';
+    const idPaciente = req.query.idPaciente;
 
     const condiciones = [];
     const params = [];
     if (estado) { condiciones.push('d.estado = ?'); params.push(estado); }
     if (soloContingencia) condiciones.push('rc.id IS NOT NULL');
+    // Búsqueda por texto libre sobre columnas propias de despachos —
+    // medicamento/dosis viven dentro del JSON `contenido` (MySQL 8, ->>), no
+    // como columnas planas en esta tabla. Para "buscar por paciente" el
+    // frontend resuelve el nombre a un id exacto vía el PatientPicker/
+    // endpoint de pacientes y lo manda como idPaciente.
+    if (q) {
+      condiciones.push(`(d.referencia_farmacia LIKE ? OR d.observacion_farmacia LIKE ? OR d.motivo_rechazo LIKE ?
+                         OR d.contenido->>'$.medicamento' LIKE ? OR d.contenido->>'$.dosis' LIKE ?)`);
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+    }
+    if (idPaciente) { condiciones.push('d.id_paciente = ?'); params.push(idPaciente); }
+
+    // Un Médico solo ve los despachos de recetas que él mismo emitió — se
+    // resuelve vía el encuentro clínico que originó la receta (despachos no
+    // guarda id_medico propio). Restricción de acceso forzada del lado del
+    // servidor, no un filtro opcional: nunca depende de lo que mande el
+    // frontend. Recepcionista/Auditor siguen viendo todos los despachos.
+    // Mismo join ya usado en este módulo para el detalle (RecetasContingenciaMySQLRepository).
+    const esMedico = String(req.user.rolNombre).toUpperCase() === 'MÉDICO' && !!req.user.idMedico;
+    const joinEncuentro = esMedico
+      ? 'LEFT JOIN svc_hcl.encuentros_clinicos ec ON ec.id_encuentro = d.id_encuentro_clinico'
+      : '';
+    if (esMedico) { condiciones.push('ec.id_medico = ?'); params.push(req.user.idMedico); }
+
     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
 
     const [countRows] = await dbPool.query(
       `SELECT COUNT(*) AS total FROM svc_pre.despachos d
        LEFT JOIN svc_pre.recetas_contingencia rc ON rc.id_despacho = d.id
+       ${joinEncuentro}
        ${where}`,
       params,
     );
@@ -160,6 +190,7 @@ router.get('/', verifyToken, requireRole('Médico', 'Recepcionista', 'Auditor'),
        FROM svc_pre.despachos d
        LEFT JOIN svc_pac.pacientes p ON p.id_paciente = d.id_paciente
        LEFT JOIN svc_pre.recetas_contingencia rc ON rc.id_despacho = d.id
+       ${joinEncuentro}
        ${where}
        ORDER BY d.created_at DESC
        LIMIT ${limit} OFFSET ${offset}`,

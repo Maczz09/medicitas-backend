@@ -74,7 +74,7 @@ class GenerarRecetaPDFUseCase {
       medicamento:  contenido?.medicamento,
       dosis:        contenido?.dosis,
       cantidad:     contenido?.cantidad,
-      rutaPdf: null,
+      rutaPdf: 'generado_en_memoria',
       urlDescarga,
       correlationId,
     };

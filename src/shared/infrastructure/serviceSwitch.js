@@ -20,6 +20,22 @@ const { client } = require('../../config/redis');
 const PREFIX = 'svc:switch:';
 const CHANNEL = 'svc:switch:changed';
 
+// Nombre legible para el usuario final — mismo criterio que servicioAfectado
+// en shared/resilience/circuitBreaker.js, para que "Citas" se lea igual sea
+// por un circuito abierto o por este kill-switch. Ver también
+// serviceSwitch.routes.js#MODULOS_TOGGLEABLES (misma lista de módulos).
+const NOMBRES_LEGIBLES = {
+  pacientes: 'Pacientes',
+  medicos: 'Médicos',
+  citas: 'Citas',
+  seguros: 'Coberturas',
+  pagos: 'Pagos',
+  'historias-clinicas': 'Historias clínicas',
+  prescripciones: 'Prescripciones',
+  facturacion: 'Facturación',
+  notificaciones: 'Notificaciones',
+};
+
 const cache = new Map(); // nombre -> boolean (habilitado)
 let subscriber = null;
 
@@ -67,6 +83,18 @@ async function init() {
       try {
         const { nombre, habilitado } = JSON.parse(message);
         cache.set(nombre, !!habilitado);
+        // Se dispara en CADA worker (cada uno tiene su propio subscriber
+        // conectado al mismo canal Redis) — logra fan-out cluster-wide sin
+        // pasar por RabbitMQ, reusando el pub/sub que ya existe para esto.
+        // Require lazy: mismo motivo que en circuitBreaker.js (evitar
+        // arrastrar el setInterval de ping de realtime.routes.js).
+        try {
+          const { emitirEventoOperacional } = require('./realtime.routes');
+          const servicioLegible = NOMBRES_LEGIBLES[nombre] || nombre;
+          emitirEventoOperacional(habilitado ? 'ServicioHabilitado' : 'ServicioDeshabilitado', { servicio: servicioLegible });
+        } catch (e) {
+          logger.warn({ err: e.message, nombre }, '[serviceSwitch] No se pudo emitir el evento de tiempo real');
+        }
       } catch { /* mensaje malformado — ignorar */ }
     });
 

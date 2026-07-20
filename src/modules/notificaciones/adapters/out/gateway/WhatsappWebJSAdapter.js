@@ -289,8 +289,9 @@ class WhatsappWebJSAdapter {
 
     try {
       const msg = await conTimeout(this.client.sendMessage(destino, mensaje), WA_SEND_TIMEOUT_MS, 'WhatsApp.sendMessage');
-      logger.info({ sid: msg.id.id, destino: destinoMask, idMensaje }, '[WA-Adapter] Mensaje enviado por whatsapp-web.js');
-      return { exitoso: true, referencia: msg.id.id };
+      const msgId = msg?.id?.id || 'unknown';
+      logger.info({ sid: msgId, destino: destinoMask, idMensaje }, '[WA-Adapter] Mensaje enviado por whatsapp-web.js');
+      return { exitoso: true, referencia: msgId };
     } catch (e) {
       logger.error({ error: e.message, destino: destinoMask }, '[WA-Adapter] Error al enviar mensaje');
       throw e; // Permitir que el consumer haga retry
@@ -316,9 +317,10 @@ class WhatsappWebJSAdapter {
         WA_SEND_TIMEOUT_MS,
         'WhatsApp.sendMessage(PDF)'
       );
-      logger.info({ sid: msg.id.id, destino: destinoMask, nombreArchivo },
+      const msgId = msg?.id?.id || 'unknown';
+      logger.info({ sid: msgId, destino: destinoMask, nombreArchivo },
         '[WA-Adapter] PDF adjunto enviado por whatsapp-web.js');
-      return { exitoso: true, referencia: msg.id.id };
+      return { exitoso: true, referencia: msgId };
     } catch (e) {
       logger.error({ error: e.message, destino: destinoMask, nombreArchivo },
         '[WA-Adapter] Error al enviar PDF adjunto');

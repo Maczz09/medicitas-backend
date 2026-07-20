@@ -1,8 +1,9 @@
 const axios = require('axios');
 const http  = require('http');
 const https = require('https');
-const { crearCircuitBreaker }   = require('./circuit-breaker/circuitBreakerConfig');
+const { crearCircuitBreaker }   = require('../../../../../shared/resilience/circuitBreaker');
 const { conRetryYFallback }     = require('../../../../../shared/resilience/retryConBackoffJitter');
+const { obtenerTimeoutParaIntento } = require('../../../../../shared/resilience/config');
 const { RespuestaSanitizer }    = require('./sanitizer/RespuestaSanitizer');
 const logger = require('../../../../../shared/logger/logger');
 const { maskDocumento } = require('../../../../../shared/infrastructure/pii');
@@ -21,9 +22,13 @@ const fallbackClient = axios.create({
  *
  * Stack de resiliencia (de más interna a más externa):
  *
- *   axios.create({ timeout: 3000 })     ← capa 1: timeout por intento
- *     └─► breaker.fire()                ← capa 2: circuit breaker (sin .fallback())
- *           └─► conRetryYFallback()     ← capa 3: retry con Full Jitter + fallback final
+ *   axios (sin timeout fijo, bulkhead maxSockets:20)
+ *     └─► breaker.fire(datos, intento)   ← capa 2: circuit breaker (sin .fallback())
+ *           └─► conRetryYFallback()      ← capa 3: retry con horario fijo 3s/5s/8s + fallback final
+ *
+ * El timeout de axios es EXPONENCIAL por intento (2s/4s/8s, ver
+ * shared/resilience/config.js#obtenerTimeoutParaIntento) — cada reintento es
+ * un nuevo breaker.fire(), así que cada uno arma su propio timeout.
  *
  * Esta clase NUNCA lanza excepción por "la aseguradora está caída".
  * Siempre resuelve: con el resultado real, o con el fallback { esFallback: true }.
@@ -35,33 +40,27 @@ const fallbackClient = axios.create({
  */
 class AseguradoraAxiosAdapter {
   constructor() {
-    // Cliente HTTP con timeout propio — debe ser MENOR que CB_TIMEOUT_MS
-    // para que opossum mida tiempos consistentes. Ver circuitBreakerConfig.js.
-    // Bulkhead: agente HTTP propio — aísla los sockets de seguros del pool global.
+    // Bulkhead: agente HTTP propio — aísla los sockets de seguros del pool
+    // global. Sin timeout fijo: va por-request, exponencial por intento.
     this.client = axios.create({
       baseURL: process.env.ASEGURADORA_API_URL || 'http://localhost:4001/api/v2',
-      timeout: parseInt(process.env.HTTP_TIMEOUT_MS || '3000'),
       headers: { 'X-Api-Key': process.env.ASEGURADORA_API_KEY },
       httpAgent:  new http.Agent({ maxSockets: 20 }),
       httpsAgent: new https.Agent({ maxSockets: 20 }),
     });
 
-    this.breaker = crearCircuitBreaker(this._llamadaReal.bind(this));
-    this._onRecuperacion = null;
-    this.breaker.on('close', () => this._dispararRecuperacion());
-  }
-
-  registrarRecuperacion(fn) {
-    this._onRecuperacion = fn;
-  }
-
-  async _dispararRecuperacion() {
-    if (!this._onRecuperacion) return;
-    try {
-      await this._onRecuperacion();
-    } catch (err) {
-      logger.error({ err }, '[AseguradoraAxiosAdapter] Error en recovery replay tras cierre del circuito');
-    }
+    const { breaker, registrarRecuperacion } = crearCircuitBreaker({
+      nombreServicio: 'AseguradoraAPI',
+      servicioAfectado: 'Aseguradora',
+      accion: this._llamadaReal.bind(this),
+      // Sin errorFilter: igual que antes de este refactor, cualquier error
+      // (incluidos 4xx) cuenta para el umbral del circuito — _llamadaReal no
+      // distingue errores de configuración de fallas de disponibilidad.
+    });
+    this.breaker = breaker;
+    // Delega directo a la factory — antes cada adaptador reimplementaba su
+    // propio _onRecuperacion/_dispararRecuperacion encima de breaker.on('close').
+    this.registrarRecuperacion = registrarRecuperacion;
   }
 
   // ── Punto de entrada: llamado por ValidarCoberturaUseCase ─────────────────
@@ -80,14 +79,10 @@ class AseguradoraAxiosAdapter {
     };
 
     const resultado = await conRetryYFallback(
-      () => this.breaker.fire(datos),
+      (intento) => this.breaker.fire(datos, intento),
       () => this.breaker.opened,
       this._respuestaFallback(),
-      {
-        maxIntentos: parseInt(process.env.RETRY_MAX_INTENTOS || '3'),
-        baseMs:      parseInt(process.env.RETRY_BASE_MS      || '200'),
-        maxMs:       parseInt(process.env.RETRY_MAX_MS       || '2000'),
-      },
+      { nombreServicio: 'AseguradoraAPI' },
       logger,
     );
 
@@ -168,11 +163,14 @@ class AseguradoraAxiosAdapter {
   }
 
   // ── Llamada HTTP real (envuelta por el Circuit Breaker) ───────────────────
-  async _llamadaReal({ tipoDocumento, numeroDocumento }) {
+  // `intento` (1-based) lo reenvía opossum desde breaker.fire(datos, intento)
+  // — arma el timeout exponencial de este intento específico.
+  async _llamadaReal({ tipoDocumento, numeroDocumento }, intento) {
     logger.info({ tipoDocumento, numeroDocumento: maskDocumento(numeroDocumento) }, '[AseguradoraAxiosAdapter] Llamando a API Aseguradora');
 
     const { data } = await this.client.get('/asegurados/validar', {
       params: { tipoDocumento, numeroDocumento },
+      timeout: obtenerTimeoutParaIntento(intento),
     });
 
     // Si el servidor devuelve asegurado: false → RECHAZADA (sin póliza vigente)
@@ -216,4 +214,3 @@ class AseguradoraAxiosAdapter {
 }
 
 module.exports = { AseguradoraAxiosAdapter };
-

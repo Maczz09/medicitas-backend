@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { capturarTraceMeta } = require('../../../../../shared/infrastructure/traceContext');
+const logger = require('../../../../../shared/logger/logger');
 
 class OutboxMySQLPublisher {
   constructor(getConnection) {
@@ -13,11 +14,17 @@ class OutboxMySQLPublisher {
     // Guardar el evento en la tabla outbox de SVC-PAG en la misma transacción.
     // Columnas reales: id_evento, tipo_evento, payload, correlation_id.
     // _traceparent viaja dentro del payload — une la traza end-to-end (ver traceContext.js)
-    await connection.execute(
-      `INSERT INTO svc_pag.outbox (id_evento, tipo_evento, payload, correlation_id)
-       VALUES (?, ?, ?, ?)`,
-      [id, evento, JSON.stringify({ ...payload, ...capturarTraceMeta() }), corrId]
-    );
+    try {
+      await connection.execute(
+        `INSERT INTO svc_pag.outbox (id_evento, tipo_evento, payload, correlation_id)
+         VALUES (?, ?, ?, ?)`,
+        [id, evento, JSON.stringify({ ...payload, ...capturarTraceMeta() }), corrId]
+      );
+      logger.info({ id, evento, correlationId: corrId }, 'Evento guardado en Outbox (Pagos)');
+    } catch (error) {
+      logger.error({ error, evento, correlationId: corrId }, 'Error al guardar evento en Outbox (Pagos)');
+      throw error;
+    }
 
     return id;
   }

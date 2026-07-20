@@ -130,21 +130,12 @@ app.get('/health/ready', async (req, res) => {
     else { checks.redis = 'down'; ok = false; }
   } catch { checks.redis = 'down'; ok = false; }
 
-  // RabbitMQ SOLO es dependencia del proceso que corre el trabajo de fondo
-  // (consumers): en modo cluster, únicamente el worker #1 abre canal — los
-  // demás workers sirven HTTP y publican eventos vía outbox (MySQL), así que
-  // para ellos "sin canal" es lo NORMAL, no una falla. Sin esta distinción,
-  // 5 de 6 workers reportaban NOT_READY falsamente bajo clustering.
+  // Desde que cada worker de cluster se conecta a RabbitMQ para su propia
+  // cola de realtime SSE (ver server.js), TODOS los workers tienen canal —
+  // ya no hay un caso "worker solo-HTTP sin canal" que tratar como n/a.
   try {
-    const cluster = require('cluster');
-    const esWorkerSoloHttp = process.env.CLUSTER_MODE === 'true'
-      && cluster.worker && cluster.worker.id !== 1;
-    if (esWorkerSoloHttp) {
-      checks.rabbitmq = 'n/a (worker HTTP: eventos via outbox)';
-    } else {
-      checks.rabbitmq = rabbitmq.getChannel() ? 'up' : 'down';
-      if (checks.rabbitmq === 'down') ok = false;
-    }
+    checks.rabbitmq = rabbitmq.getChannel() ? 'up' : 'down';
+    if (checks.rabbitmq === 'down') ok = false;
   } catch { checks.rabbitmq = 'down'; ok = false; }
 
   res.status(ok ? 200 : 503).json({

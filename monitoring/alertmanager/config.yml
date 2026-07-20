@@ -1,12 +1,27 @@
+# Enrutado de alertas.
+#
+# El receiver es un BLACKHOLE deliberado: no notifica a ningún canal externo.
+# La evidencia de que la alerta funciona se ve en la UI de Alertmanager (:9093)
+# y en Prometheus (:9090/alerts), que es donde se revisa durante la operación.
+#
+# POR QUÉ NO se postea al backend (antes: http://backend:3000/api/webhook/
+# alertmanager-dummy): ese endpoint NO existe y devolvía 404. Como el 404 cuenta
+# en `http_requests_total` como error, la propia notificación alimentaba la
+# métrica que dispara HighErrorRate:
+#   alerta → POST al backend → 404 → sube la tasa de error → alerta → ...
+# Un lazo cerrado que mantenía HighErrorRate encendida para siempre (era el ÚNICO
+# 4xx/5xx del sistema) y ensuciaba el log de acceso con un warn cada 20s. El
+# plano de observabilidad nunca debe inyectar tráfico al plano de la aplicación
+# que está midiendo.
+#
+# Si luego se quiere notificar de verdad (Slack/email/PagerDuty), se agrega aquí
+# un receiver con su destino EXTERNO — nunca apuntando al backend monitoreado.
 route:
   group_by: ['alertname', 'severity']
   group_wait: 10s
   group_interval: 1m
   repeat_interval: 1h
-  receiver: 'dummy-webhook'
+  receiver: 'blackhole'
 
 receivers:
-  - name: 'dummy-webhook'
-    webhook_configs:
-      - url: 'http://backend:3000/api/webhook/alertmanager-dummy'
-        send_resolved: true
+  - name: 'blackhole'

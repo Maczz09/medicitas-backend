@@ -7,6 +7,8 @@ const {
   CitaNoEncontradaError 
 } = require('../../domain/cita.errors');
 const { ValidationError, ResourceNotFoundError } = require('../../../../shared/domain/errors');
+const { conReintentoAnteDeadlock } = require('../../../../shared/resilience/retryOnDeadlock');
+const logger = require('../../../../shared/logger/logger');
 
 class ReservarCitaUseCase {
   constructor({
@@ -66,26 +68,11 @@ class ReservarCitaUseCase {
     });
 
     const conn = await this.getConnection();
-    await conn.beginTransaction();
-
     try {
-      // Locking row to avoid race condition
-      const [colision] = await conn.execute(
-        `SELECT id FROM svc_cit.citas
-         WHERE id_medico = ? AND fecha_hora = ?
-           AND estado NOT IN ('Cancelada', 'No_Asistida')
-         FOR UPDATE`,
-        [cita.idMedico, cita.fechaHora]
-      );
-      if (colision.length > 0) {
-        await conn.rollback();
-        await this._registrarIntentoReserva(dto, correlationId, 'FALLIDO', 'DESINCRONIZACION_CACHE', null);
-        throw new DesincronizacionCacheError('El slot fue reservado por otro proceso. La caché de disponibilidad se actualizará automáticamente.');
-      }
-
-      await this.citasRepo.save(cita, conn);
-
-      // Enriquecer el evento con nombres para el WhatsApp de confirmación
+      // Nombres para enriquecer el evento — no participan de la unicidad
+      // médico+horario; leerlos ANTES de abrir la transacción acorta el
+      // tiempo que se retiene el lock del INSERT bajo escritura concurrente
+      // (menor ventana de contención → menos deadlocks; ver retryOnDeadlock.js).
       const [[medRow]] = await conn.query(
         `SELECT CONCAT('Dr. ', nombre, ' ', apellido) AS nombre FROM svc_med.medicos WHERE id_medico = ?`,
         [cita.idMedico]
@@ -95,32 +82,58 @@ class ReservarCitaUseCase {
         [cita.idPaciente]
       );
 
-      await this.eventPublisher.publish(conn, 'CitaCreada', {
-        idCita:            cita.id,
-        idPaciente:        cita.idPaciente,
-        idMedico:          cita.idMedico,
-        fechaHora:         cita.fechaHora.toISOString(),
-        especialidad:      cita.especialidad,
-        pacienteNombre:    pacRow?.nombre ?? null,
-        medicoNombre:      medRow?.nombre ?? null,
-        pacienteTelefono:  pacRow?.telefono ?? null,
-      }, correlationId);
+      // Todo el ciclo BEGIN→trabajo→COMMIT/ROLLBACK se reintenta como unidad:
+      // un deadlock (1213) hace que InnoDB revierta la transacción completa,
+      // así que no hay nada parcial que reanudar — hay que repetirla entera.
+      await conReintentoAnteDeadlock(async () => {
+        await conn.beginTransaction();
 
-      await conn.commit();
+        try {
+          // Locking row to avoid race condition
+          const [colision] = await conn.execute(
+            `SELECT id FROM svc_cit.citas
+             WHERE id_medico = ? AND fecha_hora = ?
+               AND estado NOT IN ('Cancelada', 'No_Asistida')
+             FOR UPDATE`,
+            [cita.idMedico, cita.fechaHora]
+          );
+          if (colision.length > 0) {
+            await conn.rollback();
+            await this._registrarIntentoReserva(dto, correlationId, 'FALLIDO', 'DESINCRONIZACION_CACHE', null);
+            throw new DesincronizacionCacheError('El slot fue reservado por otro proceso. La caché de disponibilidad se actualizará automáticamente.');
+          }
 
-      // Métrica de negocio (Prometheus/Grafana). El contador vivía en el use
-      // case viejo citas.usecases.js (código muerto) y nunca se incrementaba
-      // desde la API real → el dashboard mostraba 0. Se mueve aquí.
-      try {
-        const { citasCreadasCounter } = require('../../../../config/metrics');
-        citasCreadasCounter.inc({ especialidad: cita.especialidad || 'General' });
-      } catch { /* la métrica nunca debe romper la reserva */ }
+          await this.citasRepo.save(cita, conn);
 
-      await this.disponibilidadCache.marcarOcupado(cita.idMedico, cita.fechaHora).catch(() => {});
+          await this.eventPublisher.publish(conn, 'CitaCreada', {
+            idCita:            cita.id,
+            idPaciente:        cita.idPaciente,
+            idMedico:          cita.idMedico,
+            fechaHora:         cita.fechaHora.toISOString(),
+            especialidad:      cita.especialidad,
+            pacienteNombre:    pacRow?.nombre ?? null,
+            medicoNombre:      medRow?.nombre ?? null,
+            pacienteTelefono:  pacRow?.telefono ?? null,
+          }, correlationId);
 
-    } catch (err) {
-      await conn.rollback();
-      throw err;
+          await conn.commit();
+
+          // Métrica de negocio (Prometheus/Grafana). El contador vivía en el use
+          // case viejo citas.usecases.js (código muerto) y nunca se incrementaba
+          // desde la API real → el dashboard mostraba 0. Se mueve aquí.
+          try {
+            const { citasCreadasCounter } = require('../../../../config/metrics');
+            citasCreadasCounter.inc({ especialidad: cita.especialidad || 'General' });
+          } catch { /* la métrica nunca debe romper la reserva */ }
+
+          await this.disponibilidadCache.marcarOcupado(cita.idMedico, cita.fechaHora).catch(() => {});
+
+        } catch (err) {
+          await conn.rollback();
+          throw err;
+        }
+      }, { nombreServicio: 'ReservarCita→MySQL' }, logger);
+
     } finally {
       conn.release();
     }

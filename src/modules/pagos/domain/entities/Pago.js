@@ -8,7 +8,7 @@ const EstadoPago = Object.freeze({
 class Pago {
   constructor({
     id, idCita, idPaciente,
-    idValidacionCobertura, codigoAutorizacionSeguro,
+    idValidacionCobertura, codigoAutorizacionSeguro, coberturaVerificada,
     metodoPago, montoTotal, montoCubiertoSeguro, montoCopago,
     tipoComprobante, estado, observaciones, correlationId,
   }) {
@@ -17,6 +17,10 @@ class Pago {
     this.idPaciente                = idPaciente;
     this.idValidacionCobertura     = idValidacionCobertura     || null;
     this.codigoAutorizacionSeguro  = codigoAutorizacionSeguro  || null;
+    // Default true a propósito (no `|| true`, que convertiría un false real en
+    // true): cubre "sin cobertura declarada" y "verificada con éxito". Solo es
+    // false cuando se pasa explícito — ver ConfirmarPagoUseCase.js.
+    this.coberturaVerificada       = coberturaVerificada !== false;
     this.metodoPago                = metodoPago;
     this.montoTotal                = montoTotal;
     this.montoCubiertoSeguro       = montoCubiertoSeguro;
@@ -29,12 +33,13 @@ class Pago {
 
   static crear({
     idCita, idPaciente, idValidacionCobertura, codigoAutorizacionSeguro,
-    metodoPago, montos, tipoComprobante, observaciones, correlationId,
+    coberturaVerificada, metodoPago, montos, tipoComprobante, observaciones,
+    correlationId,
   }) {
     return new Pago({
       id: `PAG-${Date.now()}`,
       idCita, idPaciente,
-      idValidacionCobertura, codigoAutorizacionSeguro,
+      idValidacionCobertura, codigoAutorizacionSeguro, coberturaVerificada,
       metodoPago:           metodoPago.toString(),
       montoTotal:           montos.montoTotal,
       montoCubiertoSeguro:  montos.montoCubiertoSeguro,
@@ -61,9 +66,10 @@ class Pago {
     return this;
   }
 
-  tieneCobertura() { return !!this.codigoAutorizacionSeguro; }
+  tieneCobertura() { return !!this.idValidacionCobertura || !!this.codigoAutorizacionSeguro; }
   estaAprobado()   { return this.estado === EstadoPago.APROBADO; }
   estaReversado()  { return this.estado === EstadoPago.REVERSADO; }
+  necesitaVerificacionCobertura() { return this.tieneCobertura() && !this.coberturaVerificada; }
 }
 
 module.exports = { Pago, EstadoPago };

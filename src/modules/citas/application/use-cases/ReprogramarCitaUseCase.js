@@ -1,5 +1,7 @@
 const { ValidationError } = require('../../../../shared/domain/errors');
 const { CitaNoEncontradaError, ColisionHorarioError, DesincronizacionCacheError } = require('../../domain/cita.errors');
+const { conReintentoAnteDeadlock } = require('../../../../shared/resilience/retryOnDeadlock');
+const logger = require('../../../../shared/logger/logger');
 
 class ReprogramarCitaUseCase {
   constructor({ citasRepository, disponibilidadCache, eventPublisher, getConnection }) {
@@ -32,43 +34,51 @@ class ReprogramarCitaUseCase {
     cita.idMedico = medicoDestino;
 
     const conn = await this.getConnection();
-    await conn.beginTransaction();
-
     try {
-      const [colision] = await conn.execute(
-        `SELECT id FROM svc_cit.citas
-         WHERE id_medico = ? AND fecha_hora = ?
-           AND estado NOT IN ('Cancelada', 'No_Asistida')
-           AND id != ?
-         FOR UPDATE`,
-        [medicoDestino, fechaNueva, cita.id]
-      );
-      if (colision.length > 0) {
-        await conn.rollback();
-        throw new DesincronizacionCacheError('El slot fue tomado por otro proceso justo antes de reprogramar');
-      }
+      // Todo el ciclo BEGIN→trabajo→COMMIT/ROLLBACK se reintenta como unidad
+      // ante un deadlock (1213) — mismo patrón SELECT...FOR UPDATE + write
+      // sobre idx_medico_fecha que ReservarCitaUseCase; ver retryOnDeadlock.js.
+      await conReintentoAnteDeadlock(async () => {
+        await conn.beginTransaction();
 
-      await this.citasRepo.update(cita, conn);
+        try {
+          const [colision] = await conn.execute(
+            `SELECT id FROM svc_cit.citas
+             WHERE id_medico = ? AND fecha_hora = ?
+               AND estado NOT IN ('Cancelada', 'No_Asistida')
+               AND id != ?
+             FOR UPDATE`,
+            [medicoDestino, fechaNueva, cita.id]
+          );
+          if (colision.length > 0) {
+            await conn.rollback();
+            throw new DesincronizacionCacheError('El slot fue tomado por otro proceso justo antes de reprogramar');
+          }
 
-      await this.eventPublisher.publish(conn, 'CitaReprogramada', {
-        idCita: cita.id,
-        idPaciente: cita.idPaciente,
-        idMedicoAnterior: medicoAnterior,
-        idMedicoNuevo: cita.idMedico,
-        fechaAnterior: fechaAnterior.toISOString(),
-        fechaNueva: cita.fechaHora.toISOString(),
-      }, correlationId);
+          await this.citasRepo.update(cita, conn);
 
-      await conn.commit();
+          await this.eventPublisher.publish(conn, 'CitaReprogramada', {
+            idCita: cita.id,
+            idPaciente: cita.idPaciente,
+            idMedicoAnterior: medicoAnterior,
+            idMedicoNuevo: cita.idMedico,
+            fechaAnterior: fechaAnterior.toISOString(),
+            fechaNueva: cita.fechaHora.toISOString(),
+          }, correlationId);
 
-      await Promise.allSettled([
-        this.disponibilidadCache.liberarSlot(medicoAnterior, fechaAnterior),
-        this.disponibilidadCache.marcarOcupado(cita.idMedico, cita.fechaHora),
-      ]);
+          await conn.commit();
 
-    } catch (err) {
-      await conn.rollback();
-      throw err;
+          await Promise.allSettled([
+            this.disponibilidadCache.liberarSlot(medicoAnterior, fechaAnterior),
+            this.disponibilidadCache.marcarOcupado(cita.idMedico, cita.fechaHora),
+          ]);
+
+        } catch (err) {
+          await conn.rollback();
+          throw err;
+        }
+      }, { nombreServicio: 'ReprogramarCita→MySQL' }, logger);
+
     } finally {
       conn.release();
     }

@@ -1,0 +1,136 @@
+const { Cobertura }  = require('../../../domain/entities/Cobertura');
+const { DomainError } = require('../../../../../shared/domain/errors');
+
+class CoberturasMySQLRepository {
+  constructor(pool) {
+    this.pool = pool;
+  }
+
+  // Recibe conexión activa de la TX — no abre conexión propia
+  async save(cobertura, connection) {
+    try {
+      await connection.execute(
+        `INSERT INTO svc_seg.validaciones_cobertura
+         (id, id_paciente, id_aseguradora, numero_poliza, tipo_consulta,
+          estado_cobertura, porcentaje_cobertura, codigo_autorizacion,
+          vigencia, es_fallback, correlation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          cobertura.id, cobertura.idPaciente, cobertura.idAseguradora,
+          cobertura.numeroPoliza, cobertura.tipoConsulta,
+          cobertura.estadoCobertura, cobertura.porcentajeCobertura,
+          cobertura.codigoAutorizacion, cobertura.vigencia,
+          cobertura.esFallback ? 1 : 0, cobertura.correlationId,
+        ]
+      );
+    } catch (err) {
+      throw new DomainError('ERROR_INTERNO_SEG', 500, 'Error al guardar la cobertura');
+    }
+  }
+
+  async findPendientes(limit) {
+    const conn = await this.pool.getConnection();
+    try {
+      const [rows] = await conn.execute(
+        `SELECT id, id_paciente, id_aseguradora, numero_poliza, tipo_consulta, correlation_id
+         FROM svc_seg.validaciones_cobertura
+         WHERE estado_cobertura = 'PENDIENTE'
+         ORDER BY created_at ASC
+         LIMIT ?`,
+        [limit]
+      );
+      return rows.map((r) => ({
+        id:           r.id,
+        idPaciente:   r.id_paciente,
+        idAseguradora: r.id_aseguradora,
+        numeroPoliza: r.numero_poliza,
+        tipoConsulta: r.tipo_consulta,
+        correlationId: r.correlation_id,
+      }));
+    } finally {
+      conn.release();
+    }
+  }
+
+  async actualizarResultado(id, resultado) {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.execute(
+        `UPDATE svc_seg.validaciones_cobertura
+         SET estado_cobertura = ?, porcentaje_cobertura = ?,
+             codigo_autorizacion = ?, vigencia = ?, es_fallback = 0
+         WHERE id = ? AND estado_cobertura = 'PENDIENTE'`,
+        [
+          resultado.estadoCobertura,
+          resultado.porcentajeCobertura,
+          resultado.codigoAutorizacion,
+          resultado.vigencia,
+          id,
+        ]
+      );
+    } finally {
+      conn.release();
+    }
+  }
+
+  // Actualiza una validación puntual por id — usado por el webhook de aseguradora
+  // cuando el payload trae idValidacion (correlación exacta con una fila).
+  // Recibe la conexión de la transacción activa del caller.
+  async actualizarPorId(id, nuevoEstado, connection) {
+    const [result] = await connection.execute(
+      `UPDATE svc_seg.validaciones_cobertura
+       SET estado_cobertura = ?
+       WHERE id = ? AND estado_cobertura != ?`,
+      [nuevoEstado, id, nuevoEstado]
+    );
+    return result.affectedRows;
+  }
+
+  // Fallback cuando el webhook de aseguradora no trae idValidacion: actualiza
+  // todas las validaciones asociadas a la póliza que no tengan ya ese estado.
+  // Más amplio que actualizarPorId — usar solo cuando no hay forma de acotar
+  // a un registro específico.
+  async actualizarPorPoliza(numeroPoliza, nuevoEstado, connection) {
+    const [result] = await connection.execute(
+      `UPDATE svc_seg.validaciones_cobertura
+       SET estado_cobertura = ?
+       WHERE numero_poliza = ? AND estado_cobertura != ?`,
+      [nuevoEstado, numeroPoliza, nuevoEstado]
+    );
+    return result.affectedRows;
+  }
+
+  async findById(id) {
+    const conn = await this.pool.getConnection();
+    try {
+      const [rows] = await conn.execute(
+        `SELECT id, id_paciente, id_aseguradora, numero_poliza, tipo_consulta,
+                estado_cobertura, porcentaje_cobertura, codigo_autorizacion,
+                vigencia, es_fallback, correlation_id, created_at
+         FROM svc_seg.validaciones_cobertura WHERE id = ?`,
+        [id]
+      );
+      if (rows.length === 0) return null;
+      const r = rows[0];
+      return new Cobertura({
+        id:                  r.id,
+        idPaciente:          r.id_paciente,
+        idAseguradora:       r.id_aseguradora,
+        numeroPoliza:        r.numero_poliza,
+        tipoConsulta:        r.tipo_consulta,
+        estadoCobertura:     r.estado_cobertura,
+        porcentajeCobertura: parseFloat(r.porcentaje_cobertura),
+        codigoAutorizacion:  r.codigo_autorizacion,
+        vigencia:            r.vigencia ? r.vigencia.toISOString().split('T')[0] : null,
+        esFallback:          r.es_fallback === 1,
+        correlationId:       r.correlation_id,
+      });
+    } catch (err) {
+      throw new DomainError('ERROR_INTERNO_SEG', 500, 'Error al consultar la cobertura');
+    } finally {
+      conn.release();
+    }
+  }
+}
+
+module.exports = { CoberturasMySQLRepository };

@@ -52,14 +52,25 @@ class ConfirmarPagoUseCase {
     }
 
     // ── 4. Verificar cobertura si aplica (SVC-SEG-003) ───────────────────────
-    if (idValidacionCobertura && codigoAutorizacionSeguro) {
+    // coberturaVerificada distingue DOS motivos por los que `cobertura` puede
+    // quedar en null, que antes se trataban igual:
+    //   - 404 limpio (el id no existe en Seguros): coberturaVerificada queda
+    //     TRUE — no es "temporalmente no disponible", reintentarlo después no
+    //     cambiaría nada, no hay nada que reconciliar.
+    //   - SEG-003 inalcanzable (excepción): coberturaVerificada pasa a FALSE
+    //     — este es el caso real que antes solo quedaba en un log y se perdía.
+    //     Se persiste para que el recovery-replay (pagos.routes.js) lo
+    //     encuentre y confirme la cobertura real en cuanto Seguros se
+    //     recupere, en vez de dejar el pago silenciosamente sin verificar.
+    let coberturaVerificada = true;
+    if (idValidacionCobertura) {
       let cobertura = null;
       try {
         cobertura = await this.coberturaValidator.obtenerCobertura(idValidacionCobertura);
-      } catch {
-        // SEG-003 no disponible → no bloquear el cobro, solo loguear
-        logger.warn({ idValidacionCobertura, correlationId },
-          'SVC-SEG-003 no disponible al confirmar pago. Continuando sin verificación de cobertura.');
+      } catch (err) {
+        coberturaVerificada = false;
+        logger.warn({ idValidacionCobertura, correlationId, err: err.message },
+          'SVC-SEG-003 no disponible al confirmar pago. Continuando sin verificación de cobertura — queda pendiente de reconciliar.');
       }
 
       if (cobertura !== null) {
@@ -67,7 +78,7 @@ class ConfirmarPagoUseCase {
           throw new DomainError('COBERTURA_NO_VALIDADA', 422,
             `La cobertura no está aprobada. Estado: ${cobertura.estadoCobertura}`);
         }
-        if (cobertura.codigoAutorizacion !== codigoAutorizacionSeguro) {
+        if (cobertura.codigoAutorizacion !== (codigoAutorizacionSeguro || null)) {
           throw new DomainError('COBERTURA_NO_VALIDADA', 422,
             'El código de autorización no coincide con el registro de cobertura');
         }
@@ -77,6 +88,7 @@ class ConfirmarPagoUseCase {
     // ── 5. Construir entidad ──────────────────────────────────────────────────
     const pago = Pago.crear({
       idCita, idPaciente, idValidacionCobertura, codigoAutorizacionSeguro,
+      coberturaVerificada,
       metodoPago:      metodoPagoVO,
       montos:          montosVO,
       tipoComprobante: tipoComprobanteVO,
@@ -112,6 +124,7 @@ class ConfirmarPagoUseCase {
         montoCubiertoSeguro:  pago.montoCubiertoSeguro,
         montoCopago:          pago.montoCopago,
         tieneCobertura:       pago.tieneCobertura(),
+        coberturaVerificada:  pago.coberturaVerificada,
         tipoComprobante:      pago.tipoComprobante,
       }, correlationId);
 
@@ -147,7 +160,10 @@ class ConfirmarPagoUseCase {
       montoCubiertoSeguro:  pago.montoCubiertoSeguro,
       montoCopago:          pago.montoCopago,
       tipoComprobante:      pago.tipoComprobante,
-      mensaje:              'Pago registrado. El comprobante se generará automáticamente.',
+      coberturaVerificada:  pago.coberturaVerificada,
+      mensaje: pago.necesitaVerificacionCobertura()
+        ? 'Pago registrado. La cobertura no se pudo verificar en el momento (Seguros no disponible) — se confirmará sola cuando el servicio se recupere.'
+        : 'Pago registrado. El comprobante se generará automáticamente.',
       correlationId,
     };
   }

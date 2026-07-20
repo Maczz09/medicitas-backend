@@ -109,14 +109,19 @@ services:
       FARMACIA_API_URL:     ${FARMACIA_API_URL}
       SMS_API_URL:          ${SMS_API_URL}
       SMS_API_KEY:          ${SMS_API_KEY}
-      # Resiliencia
-      HTTP_TIMEOUT_MS:      ${HTTP_TIMEOUT_MS:-3000}
-      CB_TIMEOUT_MS:        ${CB_TIMEOUT_MS:-3500}
-      CB_ERROR_THRESHOLD:   ${CB_ERROR_THRESHOLD:-50}
-      CB_RESET_TIMEOUT_MS:  ${CB_RESET_TIMEOUT_MS:-30000}
-      RETRY_MAX_INTENTOS:   ${RETRY_MAX_INTENTOS:-3}
-      RETRY_BASE_MS:        ${RETRY_BASE_MS:-200}
-      RETRY_MAX_MS:         ${RETRY_MAX_MS:-2000}
+      # Resiliencia S2S — horario único para todos los adaptadores (internos
+      # y externos). Ver src/shared/resilience/config.js y el comentario en
+      # .env.example sobre los nombres viejos que esto reemplaza.
+      RETRY_SCHEDULE_MS:          ${RETRY_SCHEDULE_MS:-3000,5000,8000}
+      RETRY_JITTER_MS:            ${RETRY_JITTER_MS:-200}
+      TIMEOUT_SCHEDULE_MS:        ${TIMEOUT_SCHEDULE_MS:-2000,4000,8000}
+      CB_TIMEOUT_MS:              ${CB_TIMEOUT_MS:-8500}
+      CB_ERROR_THRESHOLD_PERCENTAGE: ${CB_ERROR_THRESHOLD_PERCENTAGE:-50}
+      CB_RESET_TIMEOUT_MS:        ${CB_RESET_TIMEOUT_MS:-30000}
+      CB_VOLUME_THRESHOLD:        ${CB_VOLUME_THRESHOLD:-5}
+      CB_ROLLING_COUNT_TIMEOUT_MS: ${CB_ROLLING_COUNT_TIMEOUT_MS:-10000}
+      CB_ROLLING_COUNT_BUCKETS:   ${CB_ROLLING_COUNT_BUCKETS:-10}
+      BULKHEAD_MAX_SOCKETS:       ${BULKHEAD_MAX_SOCKETS:-20}
     depends_on:
       mysql:
         condition: service_healthy

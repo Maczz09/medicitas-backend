@@ -24,17 +24,33 @@ nada a mano).
 | Nivel | Objetivos | Mecanismo | Qué debe pasar |
 |---|---|---|---|
 | `modulos` | los 9 módulos de negocio | kill-switch (PATCH admin) | el módulo responde **503** al instante; el resto 200; al recuperar, 200 otra vez |
-| `infra` | redis | docker stop | caché de disponibilidad degrada a BD; kill-switch pasa a memoria local; NADA se cae |
-| `infra` | rabbitmq | docker stop | la API SIGUE (los eventos se acumulan en `outbox` con estado PENDIENTE); al volver, el worker los drena y los consumers procesan el backlog |
-| `infra` | workers | docker stop | los eventos se acumulan en outbox; al volver se drenan (mismo outbox pattern) |
-| `infra` | farmacia | docker stop | circuit breaker ABRE → recetas de CONTINGENCIA (PDF + WhatsApp); al volver, CB cierra y el recovery replay reenvía los despachos pendientes |
-| `infra` | aseguradora | docker stop | validación de cobertura usa el FALLBACK (seguros-fallback-service, cache de pólizas) |
-| `infra` | seguros-fallback | docker stop | cobertura degrada a rechazo controlado (respuesta 4xx/200-RECHAZADA, nunca 500) |
+| `infra` | redis | `kill 1` interno | caché de disponibilidad degrada a BD; kill-switch pasa a memoria local; NADA se cae |
+| `infra` | rabbitmq | `kill 1` interno | la API SIGUE (los eventos se acumulan en `outbox` con estado PENDIENTE); al volver, el worker los drena y los consumers procesan el backlog |
+| `infra` | workers | `kill 1` interno | los eventos se acumulan en outbox; al volver se drenan (mismo outbox pattern) |
+| `infra` | farmacia | `kill 1` interno | circuit breaker ABRE → recetas de CONTINGENCIA (PDF + WhatsApp); al volver, CB cierra y el recovery replay reenvía los despachos pendientes |
+| `infra` | aseguradora | `kill 1` interno | validación de cobertura usa el FALLBACK (seguros-fallback-service, cache de pólizas) |
+| `infra` | seguros-fallback | `kill 1` interno | cobertura degrada a rechazo controlado (respuesta 4xx/200-RECHAZADA, nunca 500) |
+
+### Por qué `docker exec <c> kill 1` y NO `docker stop`/`docker kill`
+
+Todos los contenedores objetivo tienen `restart: unless-stopped`, y esa política
+solo actúa cuando el contenedor muere **por su cuenta**. Tanto `docker stop`
+como `docker kill` son una detención **explícita del operador**: Docker respeta
+esa decisión y **no** lo reinicia. Verificado en vivo — tras un `docker kill`,
+`RestartCount` se queda en 0 y el contenedor permanece `exited`.
+
+Con ese método, quien revivía el servicio era el `docker start` del propio
+script: el experimento demostraba que *el script* sabe levantar contenedores, no
+que *el sistema* se auto-recupera. Matando el PID 1 desde dentro, el contenedor
+muere solo, Docker aplica la política y lo revive sin intervención — verificado:
+`RestartCount` pasa de 0 a 1 y vuelve a `running`. Por eso el log registra el
+`RestartCount` antes/después: es la evidencia dura de que se recuperó **solo**.
 
 **El mono NUNCA toca:** `mysql` (sin BD no hay sistema que observar), `nginx`
 (perderías el acceso), ni la observabilidad (`jaeger/loki/prometheus/grafana`
-— sin ella no hay evidencia del experimento). `autoheal` además puede revivir
-contenedores unhealthy por su cuenta: eso también es parte de la demo.
+— sin ella no hay evidencia del experimento). `autoheal` cubre un caso distinto
+y complementario: revive contenedores que quedan **unhealthy** (vivos pero sin
+responder al healthcheck), no los que mueren — esos los cubre la restart policy.
 
 ## 3) Procedimiento (3 terminales)
 

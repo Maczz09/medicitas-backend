@@ -11,13 +11,47 @@ class MedicosMySQLRepository {
     return rows[0] || null;
   }
 
-  async findAll() {
+  // Sin params: comportamiento EXACTO de siempre (lista completa, sin tocar)
+  // — lo siguen usando 4 consumidores del frontend que necesitan el catálogo
+  // entero (AgendaPage, DashboardAuditorPage, UserProfileModal, CitasPage de
+  // recepcionista). Con page/limit/q: pagina y busca por texto libre sobre
+  // columnas propias de médicos (sin ningún join, no hay problema de
+  // ownership aquí). meta:null en el primer caso — nadie lo lee hoy.
+  async findAll({ page, limit, q } = {}) {
+    const usaFiltros = page !== undefined || limit !== undefined || q !== undefined;
+    if (!usaFiltros) {
+      const [rows] = await db.query(
+        `SELECT id_medico, nombre, apellido, cmp, especialidad, activo
+         FROM svc_med.medicos WHERE activo = 1
+         ORDER BY apellido, nombre`
+      );
+      return { data: rows, meta: null };
+    }
+
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
+    const offset = (pageNum - 1) * limitNum;
+    const condiciones = ['activo = 1'];
+    const params = [];
+    const texto = q ? String(q).trim() : '';
+    if (texto) {
+      condiciones.push('(nombre LIKE ? OR apellido LIKE ? OR cmp LIKE ? OR especialidad LIKE ?)');
+      params.push(`%${texto}%`, `%${texto}%`, `%${texto}%`, `%${texto}%`);
+    }
+    const where = `WHERE ${condiciones.join(' AND ')}`;
+
+    const [countRows] = await db.query(`SELECT COUNT(*) AS total FROM svc_med.medicos ${where}`, params);
     const [rows] = await db.query(
       `SELECT id_medico, nombre, apellido, cmp, especialidad, activo
-       FROM svc_med.medicos WHERE activo = 1
-       ORDER BY apellido, nombre`
+       FROM svc_med.medicos ${where}
+       ORDER BY apellido, nombre
+       LIMIT ${limitNum} OFFSET ${offset}`,
+      params
     );
-    return rows;
+    return {
+      data: rows,
+      meta: { total: countRows[0].total, page: pageNum, limit: limitNum, totalPages: Math.ceil(countRows[0].total / limitNum) },
+    };
   }
 
   async findByIdAny(idMedico) {

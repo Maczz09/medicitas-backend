@@ -293,16 +293,22 @@ CREATE TABLE IF NOT EXISTS pagos (
   id_cita           VARCHAR(36)   NOT NULL,
   id_paciente       VARCHAR(36)   NOT NULL,
   codigo_autorizacion VARCHAR(100),
+  id_validacion_cobertura VARCHAR(64),
   metodo_pago       ENUM('EFECTIVO', 'POS', 'TARJETA_CREDITO', 'TARJETA_DEBITO', 'SEGURO') NOT NULL,
   monto_total       DECIMAL(10,2) NOT NULL,
   monto_cobertura   DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  -- TRUE por defecto: cubre "sin cobertura declarada" y "verificada con éxito".
+  -- Solo queda en FALSE cuando Seguros estaba inalcanzable al confirmar el
+  -- pago — ver db/migrations/006_add_verificacion_cobertura_pagos.sql.
+  cobertura_verificada TINYINT(1) NOT NULL DEFAULT 1,
   monto_copago      DECIMAL(10,2) NOT NULL,
   estado            ENUM('APROBADO', 'PROCESADO', 'PENDIENTE', 'REVERSADO', 'FALLIDO') NOT NULL DEFAULT 'APROBADO',
   tipo_comprobante  ENUM('BOLETA', 'FACTURA') NOT NULL DEFAULT 'BOLETA',
   numero_comprobante VARCHAR(20),
   created_at        TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id_pago)
+  PRIMARY KEY (id_pago),
+  INDEX idx_cobertura_pendiente (cobertura_verificada, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS outbox (

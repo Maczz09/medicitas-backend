@@ -8,6 +8,7 @@
 // horas (default 24).
 
 const db = require('../src/config/database');
+const logger = require('../src/shared/logger/logger');
 
 const TTL_HORAS = parseInt(process.env.IDEMPOTENCIA_TTL_H || '24');
 const INTERVALO_MS = parseInt(process.env.IDEMPOTENCIA_LIMPIEZA_MS || String(60 * 60 * 1000)); // 1h
@@ -20,10 +21,13 @@ async function limpiar() {
       [TTL_HORAS]
     );
     if (res.affectedRows > 0) {
-      console.log(`[LimpiezaIdempotencia] Borradas ${res.affectedRows} claves más viejas que ${TTL_HORAS}h.`);
+      logger.info(
+        { borradas: res.affectedRows, ttlHoras: TTL_HORAS },
+        `[LimpiezaIdempotencia] Borradas ${res.affectedRows} claves más viejas que ${TTL_HORAS}h.`,
+      );
     }
   } catch (err) {
-    console.error('[LimpiezaIdempotencia] Error al limpiar:', err.message);
+    logger.error({ err: err.message }, `[LimpiezaIdempotencia] Error al limpiar: ${err.message}`);
   }
 }
 
@@ -31,4 +35,4 @@ async function limpiar() {
 setTimeout(limpiar, 30_000); // pequeño delay al inicio para dar tiempo a MySQL
 setInterval(limpiar, INTERVALO_MS);
 
-console.log(`[Worker] Limpieza de idempotencia iniciada (cada ${INTERVALO_MS / 60000} min, TTL ${TTL_HORAS}h).`);
+logger.info(`[Worker] Limpieza de idempotencia iniciada (cada ${INTERVALO_MS / 60000} min, TTL ${TTL_HORAS}h).`);

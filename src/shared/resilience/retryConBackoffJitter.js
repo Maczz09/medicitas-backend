@@ -1,47 +1,36 @@
 'use strict';
 
-/**
- * retryConBackoffJitter.js — Shared Resilience Module
- *
- * Implementa el algoritmo "Full Jitter" descrito en el artículo de referencia
- * de AWS Architecture Blog ("Exponential Backoff and Jitter", Marc Brooker).
- *
- * En vez de esperar EXACTAMENTE 2^intento × base entre reintentos, se espera
- * un valor ALEATORIO entre 0 y ese máximo. Esto desincroniza a todos los
- * clientes que fallaron al mismo tiempo, evitando el "thundering herd" —
- * la ráfaga sincronizada que volvería a tumbar el servicio justo cuando
- * se está recuperando.
- *
- * ─── Capas de la pirámide de resiliencia ─────────────────────────────────────
- *
- *   conRetryYFallback()          ← capa más externa: decide reintentar o fallback
- *     └─► breaker.fire()         ← capa media: circuit breaker (sin .fallback() registrado)
- *           └─► axios.get(...)   ← capa más interna: timeout de la llamada real
- *
- * ─── Por qué los errores 4xx NUNCA se reintentan ─────────────────────────────
- *
- *   Un 400 Bad Request no lo arregla el tiempo — el problema es el dato enviado.
- *   Reintentar un 4xx es desperdicio de recursos y puede ocultar bugs en el cliente.
- *   esErrorTransitorio() traza esa línea con precisión.
- *
- * ─── Módulo reutilizable ──────────────────────────────────────────────────────
- *
- *   Este archivo vive en `src/shared/resilience/` y puede ser importado por
- *   cualquier gateway HTTP del proyecto (Farmacia, Notificaciones, etc.)
- *   sin copiar lógica de resiliencia en cada adaptador.
- */
+const { trace } = require('@opentelemetry/api');
+const {
+  RETRY_SCHEDULE_MS,
+  RETRY_JITTER_MS,
+} = require('./config');
+const { retryAttemptsCounter } = require('../../config/metrics');
+
+// Mismo patrón que shared/infrastructure/correlation.middleware.js: anota el
+// span HTTP/cliente activo (auto-instrumentado por axios) con el número de
+// intento. NO se hace desde los eventos del Circuit Breaker (open/halfOpen/
+// close) — esos disparan por transiciones agregadas, a veces desde un
+// setTimeout interno de opossum sin ningún span de request en curso.
+function anotarIntentoEnSpanActivo(intento) {
+  trace.getActiveSpan()?.setAttribute('resiliencia.intento', intento);
+}
 
 /**
- * Calcula el delay con Full Jitter.
+ * Calcula el delay para el intento N (1-based) con el horario FIJO del
+ * docente (3s/5s/8s por defecto) ± jitter aleatorio. Reemplaza el Full
+ * Jitter anterior (aleatorio 0..exponencial) — ver config.js para el
+ * trade-off (peor caso más alto, a cambio de números literales
+ * demostrables en logs/chaos-log).
  *
- * @param {number} intento   — Número de intento actual (1-based)
- * @param {number} baseMs    — Tiempo base en ms (ej: 200)
- * @param {number} maxMs     — Cap máximo en ms (ej: 2000)
- * @returns {number}          — Delay aleatorio en ms entre 0 y min(maxMs, base × 2^(intento-1))
+ * @param {number} intento — Número de intento actual (1-based)
+ * @returns {number}        — Delay en ms, siempre >= 0
  */
-function calcularBackoffConJitter(intento, baseMs, maxMs) {
-  const backoffExponencial = Math.min(maxMs, baseMs * (2 ** (intento - 1)));
-  return Math.random() * backoffExponencial; // Full Jitter
+function calcularBackoffSchedule(intento) {
+  const idx = Math.min(intento, RETRY_SCHEDULE_MS.length) - 1;
+  const base = RETRY_SCHEDULE_MS[idx];
+  const jitter = (Math.random() * 2 - 1) * RETRY_JITTER_MS; // ± RETRY_JITTER_MS
+  return Math.max(0, Math.round(base + jitter));
 }
 
 /**
@@ -53,6 +42,10 @@ function calcularBackoffConJitter(intento, baseMs, maxMs) {
  *
  * NUNCA son transitorios:
  *   - Respuestas 4xx (problema en el dato enviado, no en la red)
+ *   - Rechazo del Circuit Breaker abierto (EOPENBREAKER de opossum — no tiene
+ *     .code de red ni .response, y su mensaje no contiene "timeout", así que
+ *     cae aquí sin necesitar un caso especial: falla rápido sin desperdiciar
+ *     intentos contra un circuito ya abierto)
  *   - Errores de programación
  *
  * @param {Error} err — El error capturado
@@ -73,35 +66,42 @@ function esErrorTransitorio(err) {
   // Timeout de axios — el mensaje suele ser 'timeout of Xms exceeded'
   if (err.code === 'ECONNABORTED' || (err.message && err.message.includes('timeout'))) return true;
 
-  return false; // 4xx, errores de programación, etc. → NO reintentar
+  return false; // 4xx, errores de programación, EOPENBREAKER, etc. → NO reintentar
+}
+
+function registrarResultado(nombreServicio, resultado) {
+  retryAttemptsCounter.inc({ service: nombreServicio || 'desconocido', resultado });
 }
 
 /**
  * Ejecuta `intentarLlamada` con reintentos automáticos y fallback final.
  *
- * @param {Function} intentarLlamada   — () => Promise<any> — la llamada a reintentar
+ * @param {Function} intentarLlamada   — (intento: number) => Promise<any> — la llamada a reintentar; recibe el número de intento (1-based) para que el caller arme su propio timeout exponencial (ver shared/resilience/config.js#obtenerTimeoutParaIntento)
  * @param {Function} circuitoAbierto   — () => boolean — retorna true si el CB está OPEN
  * @param {any}      respuestaFallback — Valor a devolver si se agotan los intentos
  * @param {object}   [opciones]
- * @param {number}   [opciones.maxIntentos=3]  — Máximo número de intentos
- * @param {number}   [opciones.baseMs=200]      — Tiempo base para el backoff
- * @param {number}   [opciones.maxMs=2000]      — Cap máximo del backoff
- * @param {object}   [logger]                   — Logger opcional (con .info, .warn)
+ * @param {number}   [opciones.maxIntentos]    — Máximo número de intentos (default: RETRY_SCHEDULE_MS.length)
+ * @param {string}   [opciones.nombreServicio] — Label para medicitas_retry_attempts_total
+ * @param {object}   [logger]                  — Logger opcional (con .info, .warn)
  * @returns {Promise<any>}
  */
 async function conRetryYFallback(intentarLlamada, circuitoAbierto, respuestaFallback, opciones = {}, logger) {
-  const { maxIntentos = 3, baseMs = 200, maxMs = 2000 } = opciones;
+  const { maxIntentos = RETRY_SCHEDULE_MS.length, nombreServicio } = opciones;
 
   for (let intento = 1; intento <= maxIntentos; intento++) {
     // Si el circuit breaker ya está abierto, no gastar el timeout esperando
     if (circuitoAbierto()) {
-      logger?.warn({ servicio: 'Resiliencia' },
+      logger?.warn({ servicio: nombreServicio || 'Resiliencia' },
         'Circuit Breaker abierto — se omite el reintento, fallback inmediato.');
+      registrarResultado(nombreServicio, 'agotado');
       return respuestaFallback;
     }
 
     try {
-      return await intentarLlamada();
+      anotarIntentoEnSpanActivo(intento);
+      const resultado = await intentarLlamada(intento);
+      registrarResultado(nombreServicio, intento === 1 ? 'exitoso_primer_intento' : 'exitoso_tras_reintento');
+      return resultado;
     } catch (err) {
       const ultimoIntento = intento === maxIntentos;
       const reintentable  = esErrorTransitorio(err);
@@ -111,12 +111,13 @@ async function conRetryYFallback(intentarLlamada, circuitoAbierto, respuestaFall
           { err: err.message, intento, reintentable },
           'Fallo definitivo — usando fallback.',
         );
+        registrarResultado(nombreServicio, 'agotado');
         return respuestaFallback;
       }
 
-      const delayMs = calcularBackoffConJitter(intento, baseMs, maxMs);
+      const delayMs = calcularBackoffSchedule(intento);
       logger?.info(
-        { intento, delayMs: Math.round(delayMs), error: err.message },
+        { intento, delayMs, error: err.message },
         `Reintentando tras fallo transitorio (intento ${intento}/${maxIntentos}).`,
       );
       await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -124,47 +125,52 @@ async function conRetryYFallback(intentarLlamada, circuitoAbierto, respuestaFall
   }
 
   // Línea de seguridad — no debería alcanzarse, pero TypeScript agradece el return
+  registrarResultado(nombreServicio, 'agotado');
   return respuestaFallback;
 }
 
 /**
- * Variante sin fallback: reintenta errores transitorios con Full Jitter y,
- * si se agotan los intentos (o el error no es transitorio), RELANZA el último
- * error para que el caller conserve su manejo de errores original.
+ * Variante sin fallback: reintenta errores transitorios con el horario fijo
+ * (config.js) y, si se agotan los intentos (o el error no es transitorio),
+ * RELANZA el último error para que el caller conserve su manejo de errores
+ * original.
  *
  * Pensada para los adaptadores S2S internos (Pacientes, Citas, Coberturas),
  * cuyos catch distinguen 404 de fallas de red — un fallback fijo rompería
  * esa semántica.
  *
- * @param {Function} intentarLlamada — () => Promise<any>
- * @param {object}   [opciones]      — { maxIntentos, baseMs, maxMs }
+ * @param {Function} intentarLlamada — (intento: number) => Promise<any>
+ * @param {object}   [opciones]      — { maxIntentos, nombreServicio }
  * @param {object}   [logger]
  * @returns {Promise<any>}
  */
 async function conReintentos(intentarLlamada, opciones = {}, logger) {
-  const {
-    maxIntentos = parseInt(process.env.RETRY_MAX_INTENTOS || '3'),
-    baseMs      = parseInt(process.env.RETRY_BASE_MS      || '200'),
-    maxMs       = parseInt(process.env.RETRY_MAX_MS       || '2000'),
-  } = opciones;
+  const { maxIntentos = RETRY_SCHEDULE_MS.length, nombreServicio } = opciones;
 
   let ultimoError;
   for (let intento = 1; intento <= maxIntentos; intento++) {
     try {
-      return await intentarLlamada();
+      anotarIntentoEnSpanActivo(intento);
+      const resultado = await intentarLlamada(intento);
+      registrarResultado(nombreServicio, intento === 1 ? 'exitoso_primer_intento' : 'exitoso_tras_reintento');
+      return resultado;
     } catch (err) {
       ultimoError = err;
-      if (!esErrorTransitorio(err) || intento === maxIntentos) throw err;
+      if (!esErrorTransitorio(err) || intento === maxIntentos) {
+        registrarResultado(nombreServicio, 'agotado');
+        throw err;
+      }
 
-      const delayMs = calcularBackoffConJitter(intento, baseMs, maxMs);
+      const delayMs = calcularBackoffSchedule(intento);
       logger?.info(
-        { intento, delayMs: Math.round(delayMs), error: err.message },
+        { intento, delayMs, error: err.message },
         `Reintento tras fallo transitorio (intento ${intento}/${maxIntentos}).`,
       );
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
+  registrarResultado(nombreServicio, 'agotado');
   throw ultimoError;
 }
 
-module.exports = { conRetryYFallback, conReintentos, esErrorTransitorio, calcularBackoffConJitter };
+module.exports = { conRetryYFallback, conReintentos, esErrorTransitorio, calcularBackoffSchedule };

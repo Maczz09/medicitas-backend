@@ -35,7 +35,7 @@ function Run-Full($total, $vus, $wr, $mode) {
 
 switch ($Nivel) {
   'smoke'  { Run-Carga 50 5 0 }
-  'nivel1' { $v = if ($env:VUS) { $env:VUS } else { 100 }; Run-Carga 1000 $v 0 }
+  'nivel1' { $v = if ($env:VUS) { $env:VUS } else { 100 }; Run-Carga 100000 $v 0 }
   'nivel2' { $v = if ($env:VUS) { $env:VUS } else { 150 }; Run-Carga 500000 $v 0 }
   'nivel3' { $v = if ($env:VUS) { $env:VUS } else { 150 }; Run-Carga 1000000 $v 0 }
   'escrituras' { $t = if ($env:TOTAL) { $env:TOTAL } else { 20000 }; $v = if ($env:VUS) { $env:VUS } else { 50 }; Run-Carga $t $v 1 }

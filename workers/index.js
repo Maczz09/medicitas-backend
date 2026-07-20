@@ -1,6 +1,7 @@
 require('dotenv').config();
 const database = require('../src/config/database');
 const rabbitmq = require('../src/config/rabbitmq');
+const logger = require('../src/shared/logger/logger');
 
 async function startWorkers() {
   await database.query('SELECT 1');
@@ -18,7 +19,9 @@ async function startWorkers() {
   // server.js (NotificacionesConsumer). El antiguo consumer de este directorio
   // era código muerto (mandaba emails falsos) y se eliminó.
 
-  console.log('[Workers] Todos los workers iniciados correctamente.');
+  logger.info('[Workers] Todos los workers iniciados correctamente.');
 }
 
-startWorkers().catch(console.error);
+startWorkers().catch((err) =>
+  logger.error({ err: err.message, stack: err.stack }, `[Workers] Fallo al iniciar: ${err.message}`),
+);

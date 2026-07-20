@@ -67,16 +67,36 @@ router.get('/', verifyToken, requireRole('Auditor'), async (req, res, next) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
     const offset = (page - 1) * limit;
     const estado = req.query.estado;
-    const where = estado ? 'WHERE estado = ?' : '';
-    const params = estado ? [estado] : [];
+    const q = req.query.q ? req.query.q.trim() : '';
+    const idPaciente = req.query.idPaciente;
+    const condiciones = [];
+    const params = [];
+    if (estado) { condiciones.push('n.estado = ?'); params.push(estado); }
+    // Búsqueda por texto libre sobre columnas propias de notificaciones. Para
+    // "buscar por paciente" el frontend resuelve el nombre a un id exacto vía
+    // el PatientPicker/endpoint de pacientes y lo manda como idPaciente.
+    if (q) {
+      condiciones.push('(n.tipo_evento LIKE ? OR n.telefono_destino LIKE ? OR n.contenido LIKE ? OR n.referencia_gateway LIKE ?)');
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+    }
+    if (idPaciente) { condiciones.push('n.id_paciente = ?'); params.push(idPaciente); }
+    const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
 
-    const [countRows] = await dbPool.query(`SELECT COUNT(*) AS total FROM svc_not.mensajes_sms ${where}`, params);
+    const [countRows] = await dbPool.query(
+      `SELECT COUNT(*) AS total FROM svc_not.mensajes_sms n
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = n.id_paciente
+       ${where}`,
+      params,
+    );
     const [rows] = await dbPool.query(
-      `SELECT id_mensaje, id_evento_origen, tipo_evento, telefono_destino, contenido, estado,
-              intentos, error_msg, correlation_id, created_at, enviado_en
-       FROM svc_not.mensajes_sms
+      `SELECT n.id_mensaje, n.id_evento_origen, n.tipo_evento, n.id_paciente, n.telefono_destino,
+              n.contenido, n.estado, n.referencia_gateway, n.intentos, n.error_msg,
+              n.correlation_id, n.created_at, n.enviado_en,
+              CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre
+       FROM svc_not.mensajes_sms n
+       LEFT JOIN svc_pac.pacientes p ON p.id_paciente = n.id_paciente
        ${where}
-       ORDER BY created_at DESC
+       ORDER BY n.created_at DESC
        LIMIT ${limit} OFFSET ${offset}`,
       params,
     );

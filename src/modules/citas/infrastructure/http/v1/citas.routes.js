@@ -110,10 +110,19 @@ router.get('/', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'),
     // LEFT JOIN + `p.activo IS NULL` cubre el caso (anómalo) de un paciente
     // que ya no exista en absoluto, para no ocultar la cita silenciosamente.
     const incluirInactivos = req.query.incluirInactivos === 'true';
+    const q = req.query.q ? req.query.q.trim() : '';
+    const idPaciente = req.query.idPaciente;
     const condiciones = [];
     const params = [];
     if (estado) { condiciones.push('c.estado = ?'); params.push(estado); }
     if (!incluirInactivos) condiciones.push('(p.activo = 1 OR p.activo IS NULL)');
+    // Búsqueda por texto libre solo sobre columnas propias de citas (evita
+    // profundizar el LEFT JOIN de abajo, que existe únicamente para MOSTRAR
+    // paciente_nombre/medico_nombre, no para filtrar). Para "buscar por
+    // paciente" el frontend resuelve el nombre a un id exacto vía el
+    // PatientPicker/endpoint de pacientes y lo manda como idPaciente.
+    if (q) { condiciones.push('c.especialidad LIKE ?'); params.push(`%${q}%`); }
+    if (idPaciente) { condiciones.push('c.id_paciente = ?'); params.push(idPaciente); }
     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
 
     const [countRows] = await dbPool.query(

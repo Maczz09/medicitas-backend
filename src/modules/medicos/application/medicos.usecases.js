@@ -40,8 +40,8 @@ class MedicosUseCases {
     return nuevoMedico;
   }
 
-  async listMedicos() {
-    return this.medicosRepository.findAll();
+  async listMedicos(params) {
+    return this.medicosRepository.findAll(params);
   }
 
   async getMedico(idMedico) {

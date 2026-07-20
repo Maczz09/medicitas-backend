@@ -1,0 +1,30 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - "/etc/prometheus/alert.rules.yml"
+
+scrape_configs:
+  - job_name: 'medicitas-backend'
+    static_configs:
+      - targets: ['backend:3000']
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  - job_name: 'farmacia-api'
+    static_configs:
+      - targets: ['farmacia_api:4002']
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  - job_name: 'aseguradora-api'
+    static_configs:
+      - targets: ['aseguradora_prosalud_api:4001']
+    metrics_path: /metrics
+    scrape_interval: 10s

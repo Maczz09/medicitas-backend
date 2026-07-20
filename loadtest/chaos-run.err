@@ -1,0 +1,56 @@
+Add-Content : El proceso no puede obtener acceso al archivo 'D:\SOA\medicitas-backend\loadtest\chaos-log.txt' porque 
+est  siendo utilizado en otro proceso.
+En D:\SOA\medicitas-backend\loadtest\chaos-monkey.ps1: 50 Car cter: 3
++   Add-Content -Path $Log -Value $line
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (D:\SOA\medicita...t\chaos-log.txt:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+Add-Content : El proceso no puede obtener acceso al archivo 'D:\SOA\medicitas-backend\loadtest\chaos-log.txt' porque 
+est  siendo utilizado en otro proceso.
+En D:\SOA\medicitas-backend\loadtest\chaos-monkey.ps1: 50 Car cter: 3
++   Add-Content -Path $Log -Value $line
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (D:\SOA\medicita...t\chaos-log.txt:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+Add-Content : El proceso no puede obtener acceso al archivo 'D:\SOA\medicitas-backend\loadtest\chaos-log.txt' porque 
+est  siendo utilizado en otro proceso.
+En D:\SOA\medicitas-backend\loadtest\chaos-monkey.ps1: 50 Car cter: 3
++   Add-Content -Path $Log -Value $line
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (D:\SOA\medicita...t\chaos-log.txt:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+Add-Content : El proceso no puede obtener acceso al archivo 'D:\SOA\medicitas-backend\loadtest\chaos-log.txt' porque 
+est  siendo utilizado en otro proceso.
+En D:\SOA\medicitas-backend\loadtest\chaos-monkey.ps1: 50 Car cter: 3
++   Add-Content -Path $Log -Value $line
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (D:\SOA\medicita...t\chaos-log.txt:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+Add-Content : El proceso no puede obtener acceso al archivo 'D:\SOA\medicitas-backend\loadtest\chaos-log.txt' porque 
+est  siendo utilizado en otro proceso.
+En D:\SOA\medicitas-backend\loadtest\chaos-monkey.ps1: 50 Car cter: 3
++   Add-Content -Path $Log -Value $line
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (D:\SOA\medicita...t\chaos-log.txt:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+Add-Content : El proceso no puede obtener acceso al archivo 'D:\SOA\medicitas-backend\loadtest\chaos-log.txt' porque 
+est  siendo utilizado en otro proceso.
+En D:\SOA\medicitas-backend\loadtest\chaos-monkey.ps1: 50 Car cter: 3
++   Add-Content -Path $Log -Value $line
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (D:\SOA\medicita...t\chaos-log.txt:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+Add-Content : El proceso no puede obtener acceso al archivo 'D:\SOA\medicitas-backend\loadtest\chaos-log.txt' porque 
+est  siendo utilizado en otro proceso.
+En D:\SOA\medicitas-backend\loadtest\chaos-monkey.ps1: 50 Car cter: 3
++   Add-Content -Path $Log -Value $line
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (D:\SOA\medicita...t\chaos-log.txt:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 

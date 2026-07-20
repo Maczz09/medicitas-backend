@@ -3,6 +3,7 @@ const db   = require('../src/config/database');
 const crypto = require('crypto');
 const { client: redisClient } = require('../src/config/redis');
 const { DisponibilidadRedisCache } = require('../src/modules/citas/adapters/out/cache/DisponibilidadRedisCache');
+const logger = require('../src/shared/logger/logger');
 
 // Este proceso (PM2 worker-alertas-llegada) no conectaba Redis. Se conecta de
 // forma perezosa y defensiva para poder liberar el slot de agenda cuando una
@@ -17,7 +18,7 @@ async function getCacheDisponibilidad() {
     _cacheDisponibilidad = new DisponibilidadRedisCache(null);
     return _cacheDisponibilidad;
   } catch (err) {
-    console.warn('[AlertasLlegada] Redis no disponible para liberar slot:', err.message);
+    logger.warn({ err: err.message }, `[AlertasLlegada] Redis no disponible para liberar slot: ${err.message}`);
     return null;
   }
 }
@@ -73,10 +74,10 @@ async function processRecordatorios30m() {
       });
 
       await conn.commit();
-      console.log(`[AlertasLlegada] Recordatorio 30min encolado — cita ${cita.id}`);
+      logger.info({ idCita: cita.id, idPaciente: cita.id_paciente }, `[AlertasLlegada] Recordatorio 30min encolado — cita ${cita.id}`);
     } catch (err) {
       await conn.rollback();
-      console.error(`[AlertasLlegada] Error recordatorio 30min cita ${cita.id}:`, err.message);
+      logger.error({ idCita: cita.id, err: err.message }, `[AlertasLlegada] Error recordatorio 30min cita ${cita.id}: ${err.message}`);
     } finally {
       conn.release();
     }
@@ -153,14 +154,17 @@ async function processAlertasYExpiracion() {
         });
 
         await conn.commit();
-        console.log(`[AlertasLlegada] Cita ${cita.id} → No_Asistida (límite ${limite}min, ${esReservaInmediata ? 'inmediata' : 'anticipada'})`);
+        logger.info(
+          { idCita: cita.id, idPaciente: cita.id_paciente, limite, tipoReserva: esReservaInmediata ? 'inmediata' : 'anticipada', correlationId: cita.correlation_id },
+          `[AlertasLlegada] Cita ${cita.id} → No_Asistida (límite ${limite}min, ${esReservaInmediata ? 'inmediata' : 'anticipada'})`,
+        );
 
         // Compensación: liberar el slot de la agenda del médico (idempotente).
         try {
           const cache = await getCacheDisponibilidad();
           if (cache) await cache.liberarSlot(cita.id_medico, new Date(cita.fecha_hora));
         } catch (err) {
-          console.warn(`[AlertasLlegada] No se pudo liberar slot de cita ${cita.id}:`, err.message);
+          logger.warn({ idCita: cita.id, err: err.message }, `[AlertasLlegada] No se pudo liberar slot de cita ${cita.id}: ${err.message}`);
         }
 
       } else if (diffMin >= checkpointTardio && !cita.alerta_min10) {
@@ -178,7 +182,10 @@ async function processAlertasYExpiracion() {
         });
 
         await conn.commit();
-        console.log(`[AlertasLlegada] Alerta tardía (${diffMin}min, quedan ${limite - diffMin}) — cita ${cita.id}`);
+        logger.info(
+          { idCita: cita.id, diffMin, minutosRestantes: limite - diffMin, checkpoint: 'tardio', correlationId: cita.correlation_id },
+          `[AlertasLlegada] Alerta tardía (${diffMin}min, quedan ${limite - diffMin}) — cita ${cita.id}`,
+        );
 
       } else if (diffMin >= checkpointTemprano && !cita.alerta_min5) {
         await conn.execute('UPDATE svc_cit.citas SET alerta_min5 = 1 WHERE id = ?', [cita.id]);
@@ -195,7 +202,10 @@ async function processAlertasYExpiracion() {
         });
 
         await conn.commit();
-        console.log(`[AlertasLlegada] Alerta temprana (${diffMin}min, quedan ${limite - diffMin}) — cita ${cita.id}`);
+        logger.info(
+          { idCita: cita.id, diffMin, minutosRestantes: limite - diffMin, checkpoint: 'temprano', correlationId: cita.correlation_id },
+          `[AlertasLlegada] Alerta temprana (${diffMin}min, quedan ${limite - diffMin}) — cita ${cita.id}`,
+        );
 
       } else if (diffMin >= 0 && !cita.alerta_min0) {
         await conn.execute('UPDATE svc_cit.citas SET alerta_min0 = 1 WHERE id = ?', [cita.id]);
@@ -212,14 +222,17 @@ async function processAlertasYExpiracion() {
         });
 
         await conn.commit();
-        console.log(`[AlertasLlegada] Alerta min0 (tolerancia ${limite}min) — cita ${cita.id}`);
+        logger.info(
+          { idCita: cita.id, diffMin: 0, minutosRestantes: limite, checkpoint: 'min0', correlationId: cita.correlation_id },
+          `[AlertasLlegada] Alerta min0 (tolerancia ${limite}min) — cita ${cita.id}`,
+        );
 
       } else {
         await conn.commit();
       }
     } catch (err) {
       await conn.rollback();
-      console.error(`[AlertasLlegada] Error cita ${cita.id}:`, err.message);
+      logger.error({ idCita: cita.id, err: err.message, correlationId: cita.correlation_id }, `[AlertasLlegada] Error cita ${cita.id}: ${err.message}`);
     } finally {
       conn.release();
     }
@@ -233,7 +246,7 @@ async function runCrons() {
       processAlertasYExpiracion(),
     ]);
   } catch (err) {
-    console.error('[AlertasLlegada] Error general:', err.message);
+    logger.error({ err: err.message }, `[AlertasLlegada] Error general: ${err.message}`);
   }
 }
 
@@ -241,4 +254,4 @@ async function runCrons() {
 runCrons();
 setInterval(runCrons, 60000);
 
-console.log('[Worker] Alertas Llegada cron iniciado (cada minuto, enviando a Outbox).');
+logger.info('[Worker] Alertas Llegada cron iniciado (cada minuto, enviando a Outbox).');

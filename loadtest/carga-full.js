@@ -89,6 +89,13 @@ function fechaHoraHabil() {
   return `${yyyy}-${mm}-${dd}T${String(hora).padStart(2, '0')}:${min}:00`;
 }
 
+// Elige un médico al azar del pool descubierto en setup() — reparte la carga
+// entre calendarios distintos en vez de concentrarla en uno solo.
+function elegirMedico(d) {
+  if (!d.medicos || !d.medicos.length) return { id: d.medicoId, especialidad: d.especialidad };
+  return d.medicos[Math.floor(Math.random() * d.medicos.length)];
+}
+
 // Envuelve una petición: la taggea por módulo y registra métricas propias.
 function pedir(modulo, fn) {
   const res = fn();
@@ -112,26 +119,34 @@ export function setup() {
   const hd = h(token);
   const data = { token };
 
-  // Descubrir un médico CON horario real (no todos los sembrados tienen agenda).
-  // Se prueba GET /slots en un lunes de referencia y se elige el primero que
-  // devuelva tieneHorario:true — si no, la cascada de cita/pago nunca arranca.
+  // Descubrir TODOS los médicos con horario real (no todos los sembrados
+  // tienen agenda necesariamente). Antes se probaba hasta el 15º de la
+  // lista y se quedaba con el PRIMERO que tuviera agenda — con eso, TODA la
+  // carga de escritura (y las lecturas de /medicos/:id) le pegaba al mismo
+  // calendario sin importar cuántas VUs corrieran. Con el catálogo sembrado
+  // (ver loadtest/seed-medicos.sh, ~17 médicos) se recopilan TODOS los que
+  // sí tienen agenda y cada llamada elige uno al azar (elegirMedico) — la
+  // carga se reparte entre calendarios distintos como en una clínica real.
   const meds = http.get(`${BASE}/api/v2/medicos`, hd);
   let lista = [];
   try { lista = meds.json('data') || []; } catch (e) { /* ignore */ }
   const LUNES_REF = '2026-08-03';
-  for (const m of lista.slice(0, 15)) {
+  data.medicos = [];
+  for (const m of lista) {
     const id = m.id_medico || m.id;
     if (!id) continue;
     const s = http.get(`${BASE}/api/v2/medicos/${id}/slots?fecha=${LUNES_REF}`, hd);
     let tiene = false;
     try { tiene = s.json('data.tieneHorario') === true; } catch (e) { /* ignore */ }
-    if (tiene) { data.medicoId = id; data.especialidad = m.especialidad || 'Medicina General'; break; }
+    if (tiene) data.medicos.push({ id, especialidad: m.especialidad || 'Medicina General' });
   }
   // Fallback: el primero de la lista (aunque no tenga agenda) para no quedar sin id.
-  if (!data.medicoId && lista.length) {
-    data.medicoId = lista[0].id_medico || lista[0].id;
-    data.especialidad = lista[0].especialidad || 'Medicina General';
+  if (!data.medicos.length && lista.length) {
+    data.medicos.push({ id: lista[0].id_medico || lista[0].id, especialidad: lista[0].especialidad || 'Medicina General' });
   }
+  // Compat: alias singular (primero del pool) por si algo más los espera.
+  data.medicoId = data.medicos[0]?.id;
+  data.especialidad = data.medicos[0]?.especialidad;
 
   const pacs = http.get(`${BASE}/api/v2/pacientes?pagina=1&porPagina=1`, hd);
   try { data.pacienteId = pacs.json('data.0.id_paciente') || pacs.json('data.0.id'); } catch (e) { /* ignore */ }
@@ -155,10 +170,11 @@ function leerPacientes(d) {
 }
 function leerMedicos(d) {
   pedir('medicos', () => http.get(`${BASE}/api/v2/medicos`, h(d.token)));
-  if (d.medicoId) {
-    pedir('medicos', () => http.get(`${BASE}/api/v2/medicos/${d.medicoId}`, h(d.token)));
-    pedir('medicos', () => http.get(`${BASE}/api/v2/medicos/${d.medicoId}/slots?fecha=2026-08-03`, h(d.token)));
-    pedir('horarios', () => http.get(`${BASE}/api/v2/medicos/${d.medicoId}/disponibilidad?fecha=2026-08-03`, h(d.token)));
+  const medico = elegirMedico(d);
+  if (medico.id) {
+    pedir('medicos', () => http.get(`${BASE}/api/v2/medicos/${medico.id}`, h(d.token)));
+    pedir('medicos', () => http.get(`${BASE}/api/v2/medicos/${medico.id}/slots?fecha=2026-08-03`, h(d.token)));
+    pedir('horarios', () => http.get(`${BASE}/api/v2/medicos/${medico.id}/disponibilidad?fecha=2026-08-03`, h(d.token)));
   }
 }
 function leerCitas(d) {
@@ -232,13 +248,16 @@ function cascadaEscritura(d) {
   }
 
   // 3) Crear cita en un día hábil futuro y slot dentro de 08:00-12:30 (rango que
-  //    cubren los médicos con agenda). Se dispersa en ~12 semanas × 9 slots para
-  //    que las colisiones (409, válidas) sean raras y haya citas que sí se crean.
+  //    cubren los médicos con agenda). Se dispersa en ~12 semanas × 9 slots
+  //    Y ahora también entre TODOS los médicos del pool (elegirMedico) para
+  //    que las colisiones (409, válidas) sean raras y haya citas que sí se
+  //    creen, sin que todas compitan por el calendario de un solo médico.
   let idCita = null;
-  if (idPaciente && d.medicoId) {
+  const medico = elegirMedico(d);
+  if (idPaciente && medico.id) {
     const cita = pedir('citas', () => http.post(`${BASE}/api/v2/citas`, JSON.stringify({
-      idPaciente, idMedico: d.medicoId,
-      especialidad: d.especialidad || 'Medicina General',
+      idPaciente, idMedico: medico.id,
+      especialidad: medico.especialidad || 'Medicina General',
       fechaHora: fechaHoraHabil(),
     }), h(d.token, { 'Idempotency-Key': unico() })));
     // POST /citas devuelve el id en `idCita` al nivel superior (no en data.id).

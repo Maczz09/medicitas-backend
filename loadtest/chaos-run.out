@@ -1,11 +1,15 @@
-22:48:15 | === CHAOS MONKEY inicia: 3 min, nivel=modulos ===
-22:48:16 | CAOS: kill-switch OFF 'seguros' (caÃ­do 12s â†’ 503)
-22:48:29 | RECUPERA: kill-switch ON 'seguros'
-22:48:52 | CAOS: kill-switch OFF 'pacientes' (caÃ­do 14s â†’ 503)
-22:49:07 | RECUPERA: kill-switch ON 'pacientes'
-22:49:31 | CAOS: kill-switch OFF 'medicos' (caÃ­do 22s â†’ 503)
-22:49:55 | RECUPERA: kill-switch ON 'medicos'
-22:50:35 | CAOS: kill-switch OFF 'citas' (caÃ­do 10s â†’ 503)
-22:50:47 | RECUPERA: kill-switch ON 'citas'
-22:51:27 | === RESTAURANDO TODO ===
-22:51:40 | === chaos terminado â€” todo restaurado ===
+23:57:47 | === CHAOS MONKEY inicia: 3 min, nivel=infra ===
+23:57:47 | (corre la carga en otra terminal: .\run.ps1 full)
+23:57:47 | CAOS: kill-switch OFF 'medicos'  (ca¡do 26s  responde 503)
+23:58:13 | RECUPERA: kill-switch ON 'medicos'
+23:58:33 | CAOS: kill-switch OFF 'citas'  (ca¡do 17s  responde 503)
+23:58:50 | RECUPERA: kill-switch ON 'citas'
+23:59:16 | CAOS: matando PID 1 dentro de medicitas_redis  (muerte propia - Docker debe revivirlo solo)
+23:59:32 | AUTO-RECUPERADO: medicitas_redis volvi¢ solo por su restart policy (RestartCount 1 -> 2)
+23:59:53 | CAOS: kill-switch OFF 'prescripciones'  (ca¡do 20s  responde 503)
+00:00:14 | RECUPERA: kill-switch ON 'prescripciones'
+00:00:37 | CAOS: matando PID 1 dentro de aseguradora_prosalud_api  (muerte propia - Docker debe revivirlo solo)
+00:00:56 | OK: aseguradora_prosalud_api sigue 'running' (RestartCount 0 -> 0; puede no haber alcanzado a morir)
+00:01:12 | === RESTAURANDO TODO ===
+00:01:20 | === chaos terminado - todo restaurado ===
+00:01:20 | Evidencia: chaos-log.txt + Grafana (dips por m¢dulo) + Jaeger (trazas con 503) + Loki (errores con correlationId)
