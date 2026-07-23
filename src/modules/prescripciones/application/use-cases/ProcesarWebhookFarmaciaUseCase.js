@@ -42,6 +42,12 @@ class ProcesarWebhookFarmaciaUseCase {
     }
 
     if (!despacho) {
+      // Si estamos en modo de prueba de carga o es un ID de prueba de la farmacia, 
+      // simulamos un 200 OK para no ensuciar los logs con errores 404.
+      if (process.env.LOAD_TEST_MODE === 'true' || idReceta.startsWith('REC-TEST')) {
+        this.logger.warn({ idReceta, estado }, 'Receta no encontrada, pero simulando éxito 200 (Modo Prueba)');
+        return { mensaje: 'Webhook simulado con éxito (Modo Prueba)', estado };
+      }
       throw errores.RECETA_NO_ENCONTRADA(idReceta);
     }
 

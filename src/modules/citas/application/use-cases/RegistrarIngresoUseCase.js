@@ -22,6 +22,7 @@ class RegistrarIngresoUseCase {
 
     // Precondición de negocio: la cita debe estar pagada para registrar el
     // ingreso. Evita que un paciente sea atendido sin haber pagado.
+    let pagoDisponible = true; // false solo si Citas→Pagos estaba inalcanzable
     if (this.requerirPago && this.pagoValidator) {
       let pago = null;
       try {
@@ -29,18 +30,31 @@ class RegistrarIngresoUseCase {
       } catch (err) {
         // Fail-safe: si Pagos no responde, NO bloqueamos el ingreso (la
         // atención clínica no debe depender de la disponibilidad de Pagos);
-        // se registra para revisión.
-        logger.warn({ idCita, err: err.message }, 'No se pudo verificar el pago antes del ingreso — se permite por fail-safe');
+        // se persiste pago_verificado=0 para que el recovery-replay de
+        // citas.routes.js lo reconcilie en cuanto Pagos se recupere.
+        pagoDisponible = false;
+        logger.warn({ idCita, err: err.message }, 'No se pudo verificar el pago antes del ingreso — se permite por fail-safe, queda pendiente de reconciliar');
       }
-      if (pago && pago.estado === 'REVERSADO') {
-        throw new DomainError('CITA_SIN_PAGO_VIGENTE', 409, 'El pago de esta cita fue reversado. No se puede registrar el ingreso.');
-      }
-      if (pago === null) {
-        throw new DomainError('CITA_NO_PAGADA', 409, 'La cita no tiene un pago registrado. Debe cobrarse antes del ingreso.');
+
+      // Solo evaluamos el resultado si Pagos SÍ respondió — si no respondió,
+      // `pago` seguiría en null pero NO significa "no hay pago", significa
+      // "no sabemos". Antes este `if` se evaluaba siempre y por eso un
+      // timeout de Pagos terminaba bloqueando el ingreso igual que un 404
+      // real (bug: contradecía el comentario de fail-safe de arriba).
+      if (pagoDisponible) {
+        if (pago && pago.estado === 'REVERSADO') {
+          throw new DomainError('CITA_SIN_PAGO_VIGENTE', 409, 'El pago de esta cita fue reversado. No se puede registrar el ingreso.');
+        }
+        if (pago === null) {
+          throw new DomainError('CITA_NO_PAGADA', 409, 'La cita no tiene un pago registrado. Debe cobrarse antes del ingreso.');
+        }
       }
     }
 
     cita.registrarIngreso(); // Entidad valida la transición
+    if (!pagoDisponible) {
+      cita.marcarPagoNoVerificado();
+    }
 
     const conn = await this.getConnection();
     await conn.beginTransaction();
@@ -54,6 +68,7 @@ class RegistrarIngresoUseCase {
         idMedico: cita.idMedico,
         fechaHoraCita: cita.fechaHora.toISOString(),
         timestampIngreso: new Date().toISOString(),
+        pagoVerificado: cita.pagoVerificado,
       }, correlationId);
 
       await conn.commit();

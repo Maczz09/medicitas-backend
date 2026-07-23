@@ -6,7 +6,13 @@ const {
   PacienteNoDisponibleError,
   CitaNoEncontradaError 
 } = require('../../domain/cita.errors');
-const { ValidationError, ResourceNotFoundError } = require('../../../../shared/domain/errors');
+// OJO: `ResourceNotFoundError` NO existe en shared/domain/errors (solo exporta
+// DomainError, ValidationError, UnauthorizedError, ForbiddenError,
+// NotFoundError, ConflictError) — importarlo dejaba el nombre en `undefined`
+// y `new ResourceNotFoundError(...)` lanzaba un TypeError sin `.codigo` ni
+// `.name` reconocibles, que el catch de abajo malinterpretaba como "Pacientes
+// no disponible" (503) en vez de "paciente no existe" (404 real de negocio).
+const { ValidationError, NotFoundError } = require('../../../../shared/domain/errors');
 const { conReintentoAnteDeadlock } = require('../../../../shared/resilience/retryOnDeadlock');
 const logger = require('../../../../shared/logger/logger');
 
@@ -41,13 +47,18 @@ class ReservarCitaUseCase {
       const existePaciente = await this.pacienteValidator.existePaciente(dto.idPaciente);
       if (!existePaciente) {
         await this._registrarIntentoReserva(dto, correlationId, 'FALLIDO', 'PACIENTE_NO_ENCONTRADO', null);
-        throw new ResourceNotFoundError(`El paciente ${dto.idPaciente} no existe`, 'PACIENTE_NO_ENCONTRADO');
+        throw new NotFoundError('PACIENTE_NO_ENCONTRADO', `El paciente ${dto.idPaciente} no existe`);
       }
     } catch (err) {
       if (err.name === 'PacienteNoDisponibleError') {
         throw err;
       }
       if (err.codigo === 'PACIENTE_NO_ENCONTRADO') throw err;
+      // Dependencia inalcanzable (circuito abierto, timeout) — a diferencia
+      // del caso de arriba, aquí SÍ dejamos rastro en la auditoría: es el
+      // único de los 4 caminos de fallo de este use case que antes no
+      // registraba ningún IntentoReserva.
+      await this._registrarIntentoReserva(dto, correlationId, 'FALLIDO', 'PACIENTE_SERVICIO_CAIDO', null);
       throw new PacienteNoDisponibleError();
     }
 

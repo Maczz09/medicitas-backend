@@ -203,6 +203,69 @@ async function bootstrap() {
     const facturacionConsumer = new FacturacionConsumer(rabbitmq.getChannel(), generarUseCase);
     await facturacionConsumer.iniciar();
 
+    // ── Recovery Replay — reverifica el nombre del paciente en comprobantes
+    // emitidos con Pacientes inalcanzable (nombre_verificado=0). Mismo patrón
+    // que pagos.routes.js/seguros.routes.js: se dispara al cerrar el CB de
+    // Facturación→Pacientes Y por sondeo periódico (un CB half-open solo se
+    // prueba si alguien hace una llamada nueva; sin un comprobante nuevo,
+    // nadie lo dispararía). A diferencia de Pagos→Coberturas, aquí no hay
+    // "inconsistencia" que alertar — el nombre es puramente cosmético para el
+    // PDF, así que simplemente se completa en cuanto se puede resolver
+    // (incluyendo un 404 limpio, que también cuenta como "resuelto").
+    const RECOVERY_LIMIT_FACTURACION = 20;
+    const REPLAY_FACTURACION_INTERVAL_MS = parseInt(process.env.REPLAY_FACTURACION_INTERVAL_MS || '15000');
+
+    let _replayFacturacionEnCurso = false;
+    async function replayVerificacionesNombreComprobante() {
+      const logger = require('./shared/logger/logger');
+      if (_replayFacturacionEnCurso) return;
+      _replayFacturacionEnCurso = true;
+      try {
+        const pendientes = await comprobantesRepo.findPendientesVerificacionNombre(RECOVERY_LIMIT_FACTURACION);
+        if (pendientes.length === 0) return;
+
+        logger.info({ total: pendientes.length }, '[Facturacion] Recovery replay: reverificando nombre de comprobantes pendientes');
+
+        for (const p of pendientes) {
+          let nombrePaciente;
+          try {
+            nombrePaciente = await pacienteAdp.obtenerNombre(p.idPaciente);
+          } catch (err) {
+            logger.warn({ idComprobante: p.id, err: err.message }, '[Facturacion] Recovery replay: Pacientes aún no disponible');
+            if (pacienteAdp.breaker?.opened) break; // el CB volvió a abrirse — no seguir el lote
+            continue;
+          }
+
+          const conn = await database.getConnection();
+          await conn.beginTransaction();
+          try {
+            const affectedRows = await comprobantesRepo.marcarNombreVerificado(p.id, nombrePaciente, conn);
+            // 0 filas = otro worker del clúster ya reconcilió esta fila primero.
+            if (affectedRows > 0) {
+              await outbox.publish(conn, 'ComprobanteNombreVerificado', {
+                idComprobante: p.id,
+                nombrePaciente,
+              }, null);
+            }
+            await conn.commit();
+          } catch (err) {
+            await conn.rollback();
+            logger.error({ err, idComprobante: p.id }, '[Facturacion] Recovery replay: fallo al reconciliar — continúa con el siguiente');
+          } finally {
+            conn.release();
+          }
+        }
+      } catch (err) {
+        logger.error({ err }, '[Facturacion] Error en recovery replay de verificación de nombre');
+      } finally {
+        _replayFacturacionEnCurso = false;
+      }
+    }
+
+    pacienteAdp.registrarRecuperacion(replayVerificacionesNombreComprobante);
+    const _replayFacturacionTimer = setInterval(replayVerificacionesNombreComprobante, REPLAY_FACTURACION_INTERVAL_MS);
+    _replayFacturacionTimer.unref(); // No mantiene vivo el proceso en tests/shutdown
+
     // Wiring de dependencias del consumer de Auditoría
     const { AuditoriaConsumer }      = require('./modules/auditoria/consumer/auditoria.consumer');
     const { TrazasMySQLRepository }  = require('./modules/auditoria/adapters/out/repositories/TrazasMySQLRepository');
@@ -366,6 +429,13 @@ async function bootstrap() {
           .catch((err) => logger.warn({ err: err.message, id: d.id }, '[Farmacia] Recovery replay: fallo individual — continúa con siguiente'));
       }
     });
+
+    // Poblar con datos reales las gauges de saturación (outbox pendiente, DLQ)
+    // que ya existían en Prometheus/Grafana pero nunca se actualizaban — ver
+    // shared/infrastructure/metricsPoller.js. Solo el worker de fondo, mismo
+    // criterio que el resto de este bloque (evita N workers repitiendo el
+    // mismo COUNT cada 15s).
+    require('./shared/infrastructure/metricsPoller').iniciar();
 
     } // fin if(deboCorrerBackground())
 

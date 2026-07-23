@@ -25,12 +25,14 @@ const { CompletarCitaUseCase } = require('../../../application/use-cases/Complet
 const { ConsultarCitaUseCase } = require('../../../application/use-cases/ConsultarCitaUseCase');
 
 const dbPool = require('../../../../../config/database');
+const logger = require('../../../../../shared/logger/logger');
 
 // Instancias de adaptadores
 const citasRepo = new CitasMySQLRepository();
 const medicoAdapter = new MedicoDisponibilidadDBAdapter();
 const cacheAdapter = new DisponibilidadRedisCache(medicoAdapter);
 const pacienteAdapter = new PacienteHttpAdapter();
+const pagoAdapter = new PagoHttpAdapter();
 const eventPublisher = new OutboxMySQLPublisher();
 
 const getConnection = async () => await dbPool.getConnection();
@@ -62,8 +64,81 @@ const registrarIngresoUseCase = new RegistrarIngresoUseCase({
   citasRepository: citasRepo,
   eventPublisher,
   getConnection,
-  pagoValidator: new PagoHttpAdapter(),
+  pagoValidator: pagoAdapter,
 });
+
+// ── Recovery Replay — reverifica ingresos que se registraron con Pagos
+// inalcanzable (pago_verificado=0). Mismo patrón que pagos.routes.js: se
+// dispara al cerrar el CB de Citas→Pagos Y por sondeo periódico (un CB
+// half-open solo se prueba si alguien hace una llamada nueva; sin un ingreso
+// nuevo con REQUERIR_PAGO_PARA_INGRESO=true, nadie lo dispararía). A
+// diferencia de Seguros, aquí NO se corrige el dato clínico — el ingreso ya
+// ocurrió — así que si el pago real no coincide, el ingreso NO se revierte
+// automáticamente (requiere criterio humano, mismo principio ya establecido
+// en pagos.routes.js): se deja constancia fuerte (log de error + evento
+// propio) para que Auditor/Recepción lo revisen.
+const RECOVERY_LIMIT_INGRESOS = 20;
+const REPLAY_INGRESOS_INTERVAL_MS = parseInt(process.env.REPLAY_INGRESOS_INTERVAL_MS || '15000');
+
+let _replayIngresosEnCurso = false;
+async function replayVerificacionesPagoIngreso() {
+  if (_replayIngresosEnCurso) return;
+  _replayIngresosEnCurso = true;
+  try {
+    const pendientes = await citasRepo.findPendientesVerificacionPago(RECOVERY_LIMIT_INGRESOS);
+    if (pendientes.length === 0) return;
+
+    logger.info({ total: pendientes.length }, '[Citas] Recovery replay: reverificando pago de ingresos pendientes');
+
+    for (const idCita of pendientes) {
+      let pago;
+      try {
+        pago = await pagoAdapter.obtenerPagoDeCita(idCita);
+      } catch (err) {
+        logger.warn({ idCita, err: err.message }, '[Citas] Recovery replay: Pagos aún no disponible');
+        if (pagoAdapter.breaker?.opened) break; // el CB volvió a abrirse — no seguir el lote
+        continue;
+      }
+
+      const conn = await getConnection();
+      await conn.beginTransaction();
+      try {
+        const affectedRows = await citasRepo.marcarPagoVerificado(idCita, conn);
+        // 0 filas = otro worker del clúster ya reconcilió esta fila primero.
+        if (affectedRows > 0) {
+          const coincide = pago !== null && pago.estado === 'APROBADO';
+
+          if (coincide) {
+            await eventPublisher.publish(conn, 'IngresoPagoVerificado', { idCita }, null);
+          } else {
+            logger.error(
+              { idCita, pago },
+              '[Citas] Pago NO coincide tras reconciliar — revisar manualmente, el ingreso NO se revierte automáticamente'
+            );
+            await eventPublisher.publish(conn, 'IngresoPagoInconsistente', {
+              idCita,
+              estadoPagoReal: pago?.estado ?? 'NO_ENCONTRADO',
+            }, null);
+          }
+        }
+        await conn.commit();
+      } catch (err) {
+        await conn.rollback();
+        logger.error({ err, idCita }, '[Citas] Recovery replay: fallo al reconciliar — continúa con el siguiente');
+      } finally {
+        conn.release();
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, '[Citas] Error en recovery replay de verificación de pago de ingreso');
+  } finally {
+    _replayIngresosEnCurso = false;
+  }
+}
+
+pagoAdapter.registrarRecuperacion(replayVerificacionesPagoIngreso);
+const _replayIngresosTimer = setInterval(replayVerificacionesPagoIngreso, REPLAY_INGRESOS_INTERVAL_MS);
+_replayIngresosTimer.unref(); // No mantiene vivo el proceso en tests/shutdown
 
 const revertirIngresoUseCase = new RevertirIngresoUseCase({
   citasRepository: citasRepo,
@@ -133,7 +208,7 @@ router.get('/', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'),
     );
     const [rows] = await dbPool.query(
       `SELECT c.id, c.id_paciente, c.id_medico, c.fecha_hora, c.especialidad, c.estado,
-              c.correlation_id, c.created_at,
+              c.pago_verificado, c.correlation_id, c.created_at,
               CONCAT(p.nombre, ' ', p.apellido) AS paciente_nombre,
               CONCAT(m.nombre, ' ', m.apellido) AS medico_nombre
        FROM svc_cit.citas c

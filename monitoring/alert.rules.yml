@@ -34,7 +34,11 @@ groups:
           runbook: "Revisar Loki buscando errorCode != null. Validar si la base de datos está rechazando conexiones."
 
       - alert: CircuitBreakerOpen
-        expr: medicitas_circuit_breaker_state == 1
+        # 2 = Abierto (renumerado: el gauge usa aggregator:'max' entre workers
+        # del clúster, así que "Abierto" debe ser el valor MÁS ALTO para que
+        # gane sobre "Medio-Abierto"=1 cuando distintos workers reportan
+        # estados distintos — ver config/metrics.js).
+        expr: medicitas_circuit_breaker_state == 2
         for: 1m
         labels:
           severity: critical
@@ -54,7 +58,7 @@ groups:
       - alert: HighLatencyPorCircuitBreakerAbierto
         expr: |
           (histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="medicitas-backend"}[5m])) by (le)) > 2.0)
-          and on() (count(medicitas_circuit_breaker_state == 1) > 0)
+          and on() (count(medicitas_circuit_breaker_state == 2) > 0)
         for: 1m
         labels:
           severity: warning

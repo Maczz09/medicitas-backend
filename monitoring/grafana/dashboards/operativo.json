@@ -16,7 +16,7 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "Cerrado", "color": "green" }, "1": { "text": "Abierto", "color": "red" }, "2": { "text": "Medio-Abierto", "color": "orange" } } }
+            { "type": "value", "options": { "0": { "text": "Cerrado", "color": "green" }, "1": { "text": "Medio-Abierto", "color": "orange" }, "2": { "text": "Abierto", "color": "red" } } }
           ]
         }
       }

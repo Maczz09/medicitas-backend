@@ -12,6 +12,23 @@ const {
 } = require('./config');
 const { circuitBreakerStateGauge } = require('../../config/metrics');
 
+// Registro de toda instancia de breaker creada — permite un snapshot de "qué
+// está abierto ahora mismo" (GET /admin/circuitos) para que el frontend
+// sincronice el estado real al cargar/recargar la página. Sin esto, el
+// ResilienceBanner solo se entera de transiciones vía SSE vistas en vivo
+// DESPUÉS de conectarse — si el circuito ya estaba abierto antes de que esa
+// pestaña existiera (o tras un F5), la pestaña queda "ciega" hasta la
+// siguiente transición real.
+const registroBreakers = new Map(); // nombreServicio -> { breaker, servicioLegible }
+
+function listarCircuitosAbiertos() {
+  const abiertos = [];
+  for (const [nombreServicio, { breaker, servicioLegible }] of registroBreakers) {
+    if (breaker.opened) abiertos.push({ nombreTecnico: nombreServicio, servicio: servicioLegible });
+  }
+  return abiertos;
+}
+
 /**
  * Factory única de Circuit Breaker (opossum) para TODOS los adaptadores S2S
  * (internos y externos). Reemplaza los 2 archivos de config duplicados que
@@ -67,6 +84,7 @@ function crearCircuitBreaker({ nombreServicio, accion, errorFilter, cbTimeoutMs,
   };
 
   const breaker = new CircuitBreaker(accion, opcionesBreaker);
+  registroBreakers.set(nombreServicio, { breaker, servicioLegible });
 
   // Semilla en 0 (Cerrado) al construir — sin esto, un servicio que nunca
   // falla queda en "no data" en Grafana en vez de mostrar "sano" desde el
@@ -93,14 +111,18 @@ function crearCircuitBreaker({ nombreServicio, accion, errorFilter, cbTimeoutMs,
   breaker.on('open', () => {
     logger.warn({ servicio: nombreServicio },
       `Circuit Breaker ABIERTO para ${nombreServicio} — demasiados fallos. Próximas llamadas van directo al fallback.`);
-    circuitBreakerStateGauge.set({ service: nombreServicio }, 1);
+    // 2 (no 1) — ver metrics.js: el gauge usa aggregator:'max' entre workers
+    // del clúster, así que el número debe reflejar SEVERIDAD (mayor = peor)
+    // para que "Abierto" gane sobre "Medio-Abierto" cuando distintos workers
+    // reportan estados distintos al mismo tiempo.
+    circuitBreakerStateGauge.set({ service: nombreServicio }, 2);
     emitir('CircuitBreakerAbierto');
   });
 
   breaker.on('halfOpen', () => {
     logger.info({ servicio: nombreServicio },
       `Circuit Breaker SEMI-ABIERTO para ${nombreServicio} — probando reconexión.`);
-    circuitBreakerStateGauge.set({ service: nombreServicio }, 2);
+    circuitBreakerStateGauge.set({ service: nombreServicio }, 1);
   });
 
   breaker.on('close', () => {
@@ -136,4 +158,4 @@ function crearCircuitBreaker({ nombreServicio, accion, errorFilter, cbTimeoutMs,
   return { breaker, registrarRecuperacion };
 }
 
-module.exports = { crearCircuitBreaker };
+module.exports = { crearCircuitBreaker, listarCircuitosAbiertos };

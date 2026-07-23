@@ -13,7 +13,7 @@ class PacienteHttpAdapter {
     });
     this.internalToken = process.env.INTERNAL_SERVICE_TOKEN?.trim();
 
-    const { breaker } = crearCircuitBreaker({
+    const { breaker, registrarRecuperacion } = crearCircuitBreaker({
       nombreServicio: NOMBRE_SERVICIO,
       servicioAfectado: 'Pacientes',
       accion: this._llamarPacientes.bind(this),
@@ -22,6 +22,7 @@ class PacienteHttpAdapter {
       errorFilter: (err) => err.response?.status === 404,
     });
     this.breaker = breaker;
+    this.registrarRecuperacion = registrarRecuperacion;
   }
 
   // `intento` (1-based) lo reenvía opossum desde breaker.fire(idPaciente, intento).
@@ -39,10 +40,27 @@ class PacienteHttpAdapter {
         { nombreServicio: NOMBRE_SERVICIO },
         logger,
       );
-      return `${resp.data.nombres} ${resp.data.apellidos}`;
+      // Bug pre-existente descubierto al verificar la reconciliación en vivo:
+      // GET /api/v2/pacientes/:id responde { data: { nombre, apellido, ... } }
+      // (singular, envuelto en `data`) — este adaptador leía
+      // `resp.data.nombres`/`apellidos` (plural, sin envoltura), que siempre
+      // eran `undefined`. Todo comprobante emitido con Pacientes disponible
+      // llevaba literalmente el nombre "undefined undefined" en el PDF.
+      const paciente = resp.data?.data ?? resp.data;
+      return `${paciente.nombre} ${paciente.apellido}`;
     } catch (error) {
-      logger.warn({ idPaciente, error: error.message }, 'No se pudo obtener el nombre del paciente desde SVC-PAC-005');
-      return null;
+      // 404 = el paciente no existe — resultado de negocio válido, nada que
+      // reconciliar después.
+      if (error.response?.status === 404) {
+        logger.warn({ idPaciente }, 'Paciente no encontrado al obtener nombre para el comprobante');
+        return null;
+      }
+      // Dependencia inalcanzable (timeout, circuito abierto) — se propaga
+      // para que GenerarComprobanteUseCase marque nombreVerificado=false y lo
+      // reconcilie automáticamente cuando Pacientes se recupere (ver
+      // recovery-replay en server.js).
+      logger.warn({ idPaciente, error: error.message }, 'Pacientes no disponible al obtener nombre para el comprobante — se emite sin nombre, queda pendiente de reconciliar');
+      throw error;
     }
   }
 }

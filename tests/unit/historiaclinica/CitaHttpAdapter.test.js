@@ -76,8 +76,30 @@ describe('historiaclinica/CitaHttpAdapter', () => {
       await expect(promesa).rejects.toMatchObject({ codigo: 'SERVICIO_CITAS_NO_DISPONIBLE', status: 503 });
     });
 
-    test('error inesperado: DomainError ERROR_INTERNO_HCL / 500', async () => {
+    test('5xx real de Citas (ya reintentado 3 veces): DomainError DEPENDENCIA_NO_DISPONIBLE / 503, no ERROR_INTERNO_HCL', async () => {
+      // Bug corregido: un error.response (cualquier status que no sea 404,
+      // incluido un 5xx real o el 503 SERVICIO_NO_DISPONIBLE del kill-switch
+      // de demo) no tiene `.code` de red ni es EOPENBREAKER, así que antes
+      // caía siempre en el 500 genérico — un "Citas no responde bien" se
+      // reportaba como error interno confuso en vez de dependencia no
+      // disponible (que es lo que realmente es: esErrorTransitorio ya trata
+      // los 5xx como reintentables antes de llegar aquí).
       mockCliente.get.mockRejectedValue({ response: { status: 500 } });
+      const adaptador = new CitaHttpAdapter();
+
+      const promesa = adaptador.obtenerEstadoCita('CIT-1');
+      promesa.catch(() => {});
+      await jest.advanceTimersByTimeAsync(20000);
+
+      await expect(promesa).rejects.toMatchObject({
+        codigo: 'DEPENDENCIA_NO_DISPONIBLE',
+        status: 503,
+        detalles: { motivo: 'REINTENTOS_AGOTADOS', servicio: 'Citas' },
+      });
+    });
+
+    test('error verdaderamente inesperado (sin response ni código de red): DomainError ERROR_INTERNO_HCL / 500', async () => {
+      mockCliente.get.mockRejectedValue(new Error('fallo de programación inesperado'));
       const adaptador = new CitaHttpAdapter();
 
       const promesa = adaptador.obtenerEstadoCita('CIT-1');

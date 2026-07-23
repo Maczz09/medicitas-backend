@@ -1,20 +1,9 @@
 ﻿
-21:53:41 | === CHAOS MONKEY inicia: 5 min, nivel=modulos ===
-21:53:41 | (corre la carga en otra terminal: .\run.ps1 full)
-21:53:41 | CAOS: kill-switch OFF 'prescripciones'  (caído 25s → responde 503)
-21:54:06 | RECUPERA: kill-switch ON 'prescripciones'
-21:54:33 | CAOS: kill-switch OFF 'citas'  (caído 23s → responde 503)
-21:54:56 | RECUPERA: kill-switch ON 'citas'
-21:55:19 | CAOS: kill-switch OFF 'pacientes'  (caído 19s → responde 503)
-21:55:39 | RECUPERA: kill-switch ON 'pacientes'
-21:55:59 | CAOS: kill-switch OFF 'facturacion'  (caído 17s → responde 503)
-21:56:17 | RECUPERA: kill-switch ON 'facturacion'
-21:56:54 | CAOS: kill-switch OFF 'notificaciones'  (caído 15s → responde 503)
-21:57:09 | RECUPERA: kill-switch ON 'notificaciones'
-21:57:27 | CAOS: kill-switch OFF 'notificaciones'  (caído 24s → responde 503)
-21:57:51 | RECUPERA: kill-switch ON 'notificaciones'
-21:58:26 | CAOS: kill-switch OFF 'historias-clinicas'  (caído 14s → responde 503)
-21:58:41 | RECUPERA: kill-switch ON 'historias-clinicas'
-21:59:21 | === RESTAURANDO TODO ===
-21:59:24 | === chaos terminado — todo restaurado ===
-21:59:24 | Evidencia: chaos-log.txt + Grafana (dips por módulo) + Jaeger (trazas con 503) + Loki (errores con correlationId)
+21:15:00 | === CHAOS MONKEY inicia: 5 min, nivel=modulos ===
+21:15:00 | (corre la carga en otra terminal: .\run.ps1 full)
+21:15:00 | CAOS: kill-switch OFF 'prescripciones'  (caído 16s → responde 503)
+21:15:00 |   (patch falló: {"error":"Demasiados intentos de autenticación. Intenta de nuevo en 15 minutos."})
+21:40:12 | RECUPERA: kill-switch ON 'prescripciones'
+21:40:45 | === RESTAURANDO TODO ===
+21:40:52 | === chaos terminado — todo restaurado ===
+21:40:52 | Evidencia: chaos-log.txt + Grafana (dips por módulo) + Jaeger (trazas con 503) + Loki (errores con correlationId)

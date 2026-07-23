@@ -17,16 +17,19 @@ class CitaHttpAdapter {
     // Token interno para llamadas entre módulos
     this.internalToken = process.env.INTERNAL_SERVICE_TOKEN?.trim();
 
-    // Un Circuit Breaker POR MÉTODO, no uno compartido: completarCita no
-    // tiene manejo de 404 propio (un 404 ahí es genuinamente anómalo, no un
-    // flujo esperado), mientras que obtenerEstadoCita trata 404 como
-    // resultado de negocio válido. Compartir un breaker abriría el circuito
-    // de uno por fallos del otro.
-    this.breakerCompletar = crearCircuitBreaker({
+    // Un Circuit Breaker POR MÉTODO, no uno compartido: completarCita trata
+    // 409 (transición inválida — la cita ya no está En_Atencion, p. ej. la
+    // cancelaron mientras tanto) como resultado de negocio, no como falla de
+    // disponibilidad, mientras que obtenerEstadoCita hace lo mismo con 404.
+    // Compartir un breaker abriría el circuito de uno por fallos del otro.
+    const { breaker: breakerCompletar, registrarRecuperacion: registrarRecuperacionCompletar } = crearCircuitBreaker({
       nombreServicio: NOMBRE_SERVICIO_COMPLETAR,
       servicioAfectado: 'Citas',
       accion: this._llamarCompletar.bind(this),
-    }).breaker;
+      errorFilter: (err) => err.response?.status === 409,
+    });
+    this.breakerCompletar = breakerCompletar;
+    this.registrarRecuperacion = registrarRecuperacionCompletar;
 
     this.breakerConsultar = crearCircuitBreaker({
       nombreServicio: NOMBRE_SERVICIO_CONSULTAR,
@@ -52,6 +55,13 @@ class CitaHttpAdapter {
       );
       return data;
     } catch (error) {
+      // 409 = Citas rechazó la transición (la cita ya no está En_Atencion,
+      // p. ej. la cancelaron mientras tanto) — resultado de negocio, no una
+      // caída de la dependencia. El recovery-replay lo trata como "ya no
+      // aplica, no reintentar más, alertar" en vez de reintentar indefinidamente.
+      if (error.response?.status === 409) {
+        throw new DomainError('CITA_TRANSICION_INVALIDA', 409, error.response?.data?.mensaje || 'La cita ya no puede completarse (el estado cambió).');
+      }
       logger.error({ idCita, err: error.message, code: error.code }, '[HistoriaClinica→Citas] Error al completar la cita');
       throw crearErrorDependencia('Citas', error);
     }
@@ -91,7 +101,17 @@ class CitaHttpAdapter {
       if (error.code === 'EOPENBREAKER') {
         throw crearErrorDependencia('Citas', error);
       }
-      // Error inesperado: loguear y relanzar como error interno
+      // Bug descubierto al verificar en vivo: Citas respondiendo con CUALQUIER
+      // HTTP status que no fuera 404 (ej. el 503 SERVICIO_NO_DISPONIBLE que
+      // devuelve el kill-switch de demo, o un 5xx real) no tiene `.code` de
+      // red ni es EOPENBREAKER, así que caía siempre en el 500 genérico de
+      // abajo — un "caída de Citas" honesto se reportaba como error interno
+      // confuso en vez de la dependencia no disponible que realmente es.
+      if (error.response) {
+        throw crearErrorDependencia('Citas', error);
+      }
+      // Error inesperado (ni respuesta HTTP ni código de red reconocido):
+      // loguear y relanzar como error interno.
       throw new DomainError('ERROR_INTERNO_HCL', 'Error al consultar el estado de la cita.', 500);
     }
   }

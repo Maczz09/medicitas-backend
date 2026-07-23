@@ -8,7 +8,6 @@ const { registrarEncuentroSchema } = require('../../../shared/infrastructure/sch
 const { ExpedienteMySQLRepository }  = require('../adapters/out/repositories/ExpedienteMySQLRepository');
 const { EncuentroMySQLRepository }   = require('../adapters/out/repositories/EncuentroMySQLRepository');
 const { CitaHttpAdapter }            = require('../adapters/out/http/CitaHttpAdapter');
-const { PacienteHttpAdapter }        = require('../adapters/out/http/PacienteHttpAdapter');
 const { OutboxMySQLPublisher }       = require('../adapters/out/events/OutboxMySQLPublisher');
 const { ConsultarResumenClinicoUseCase }    = require('../application/use-cases/ConsultarResumenClinicoUseCase');
 const { ConsultarHistoricoProfundoUseCase } = require('../application/use-cases/ConsultarHistoricoProfundoUseCase');
@@ -16,12 +15,12 @@ const { RegistrarConsultaUseCase }          = require('../application/use-cases/
 const { HistoriaClinicaController }         = require('../adapters/in/HistoriaClinicaController');
 const { Expediente }                        = require('../domain/entities/Expediente');
 const { DomainError }                       = require('../../../shared/domain/errors');
+const logger = require('../../../shared/logger/logger');
 const pool = require('../../../config/database');
 
 const expRepo    = new ExpedienteMySQLRepository(pool);
 const encRepo    = new EncuentroMySQLRepository(pool);
 const citaAdp    = new CitaHttpAdapter();
-const pacAdp     = new PacienteHttpAdapter();
 const outbox     = new OutboxMySQLPublisher();
 const connFn     = () => pool.getConnection();
 
@@ -30,6 +29,81 @@ const controller = new HistoriaClinicaController({
   historicoUseCase: new ConsultarHistoricoProfundoUseCase({ expedienteRepository: expRepo, encuentroRepository: encRepo, eventPublisher: outbox, getConnection: connFn }),
   registrarUseCase: new RegistrarConsultaUseCase({ expedienteRepository: expRepo, encuentroRepository: encRepo, citaValidator: citaAdp, eventPublisher: outbox, getConnection: connFn }),
 });
+
+// ── Recovery Replay — reintenta completar citas cuyo encuentro clínico ya se
+// guardó pero Citas estaba inalcanzable en el post-commit
+// (cita_completada_verificada=0). Mismo patrón que pagos.routes.js/
+// seguros.routes.js: se dispara al cerrar el CB de HistoriaClinica→Citas Y
+// por sondeo periódico (un CB half-open solo se prueba si alguien hace una
+// llamada nueva). Es seguro reintentar el MISMO comando (completarCita)
+// porque Citas protege su propia máquina de estados (Cita.completar() exige
+// En_Atencion): un reintento tardío nunca puede forzar una transición
+// inválida, solo completar legítimamente o fallar limpio con 409 — en cuyo
+// caso se alerta y se detiene el reintento, nunca se reinterpreta el estado
+// a mano.
+const RECOVERY_LIMIT_HCL = 20;
+const REPLAY_HCL_INTERVAL_MS = parseInt(process.env.REPLAY_HCL_INTERVAL_MS || '15000');
+
+let _replayHclEnCurso = false;
+async function replayCitasPendientesCompletar() {
+  if (_replayHclEnCurso) return;
+  _replayHclEnCurso = true;
+  try {
+    const pendientes = await encRepo.findPendientesCompletarCita(RECOVERY_LIMIT_HCL);
+    if (pendientes.length === 0) return;
+
+    logger.info({ total: pendientes.length }, '[HCL] Recovery replay: reintentando completar citas pendientes');
+
+    for (const p of pendientes) {
+      try {
+        await citaAdp.completarCita(p.idCita);
+      } catch (err) {
+        if (err.codigo === 'CITA_TRANSICION_INVALIDA') {
+          // Citas ya rechazó esta transición — no reintentar más, alertar.
+          const conn = await connFn();
+          await conn.beginTransaction();
+          try {
+            await encRepo.marcarCitaCompletadaVerificada(p.idEncuentro, conn); // detiene el replay (affectedRows guard)
+            await outbox.publish(conn, 'CitaCompletadaInconsistente', { idEncuentro: p.idEncuentro, idCita: p.idCita, motivo: err.message }, null);
+            await conn.commit();
+          } catch (e) {
+            await conn.rollback();
+            logger.error({ err: e, idEncuentro: p.idEncuentro }, '[HCL] fallo al registrar inconsistencia');
+          } finally {
+            conn.release();
+          }
+          continue;
+        }
+        logger.warn({ idEncuentro: p.idEncuentro, idCita: p.idCita, err: err.message }, '[HCL] Citas aún no disponible');
+        if (citaAdp.breakerCompletar?.opened) break; // no seguir el lote si el CB reabrió
+        continue;
+      }
+
+      const conn = await connFn();
+      await conn.beginTransaction();
+      try {
+        const affectedRows = await encRepo.marcarCitaCompletadaVerificada(p.idEncuentro, conn);
+        if (affectedRows > 0) {
+          await outbox.publish(conn, 'CitaCompletadaReconciliada', { idEncuentro: p.idEncuentro, idCita: p.idCita }, null);
+        }
+        await conn.commit();
+      } catch (err) {
+        await conn.rollback();
+        logger.error({ err, idEncuentro: p.idEncuentro }, '[HCL] fallo al reconciliar');
+      } finally {
+        conn.release();
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, '[HCL] Error en recovery replay de completar cita');
+  } finally {
+    _replayHclEnCurso = false;
+  }
+}
+
+citaAdp.registrarRecuperacion(replayCitasPendientesCompletar);
+const _replayHclTimer = setInterval(replayCitasPendientesCompletar, REPLAY_HCL_INTERVAL_MS);
+_replayHclTimer.unref(); // No mantiene vivo el proceso en tests/shutdown
 
 const router = Router();
 

@@ -1,0 +1,127 @@
+{
+  "title": "Resiliencia: Circuit Breaker, Retry y Saturación",
+  "tags": ["resiliencia", "sre", "chaos-monkey"],
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Throughput (req/s)",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{job=\"medicitas-backend\"}[1m]))", "legendFormat": "req/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latencia p50 / p95 / p99",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 6 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"medicitas-backend\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"medicitas-backend\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"medicitas-backend\"}[5m])) by (le))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate (%)",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 6 },
+      "targets": [
+        {
+          "expr": "100 * sum(rate(http_request_errors_total{job=\"medicitas-backend\"}[1m])) / clamp_min(sum(rate(http_requests_total{job=\"medicitas-backend\"}[1m])), 1)",
+          "legendFormat": "% error"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Errores por código HTTP (/s)",
+      "gridPos": { "x": 0, "y": 6, "w": 24, "h": 7 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{job=\"medicitas-backend\"}[1m])) by (status_code)", "legendFormat": "{{status_code}}" }
+      ]
+    },
+    {
+      "type": "state-timeline",
+      "title": "Estado del circuito por servicio (CLOSED / HALF_OPEN / OPEN)",
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 7 },
+      "targets": [
+        { "expr": "medicitas_circuit_breaker_state", "legendFormat": "{{service}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": {
+              "0": { "text": "Cerrado", "color": "green" },
+              "1": { "text": "Medio-Abierto", "color": "orange" },
+              "2": { "text": "Abierto", "color": "red" }
+            } }
+          ]
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Reintentos (retries/s) por servicio y resultado",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 7 },
+      "targets": [
+        { "expr": "sum(rate(medicitas_retry_attempts_total[5m])) by (service, resultado)", "legendFormat": "{{service}} — {{resultado}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Saturación: mensajes PENDIENTE en outbox, por módulo",
+      "gridPos": { "x": 0, "y": 27, "w": 12, "h": 6 },
+      "targets": [
+        { "expr": "medicitas_outbox_pending_messages", "legendFormat": "{{service}}" }
+      ],
+      "description": "Backlog real del worker de outbox (cada 5s drena hasta 50 por esquema). Si sube y no baja, el worker no da abasto — señal temprana de saturación, la misma clase de problema que el crash de k6 de esta sesión."
+    },
+    {
+      "type": "timeseries",
+      "title": "Dead Letter Queue — mensajes por cola",
+      "gridPos": { "x": 12, "y": 27, "w": 12, "h": 6 },
+      "targets": [
+        { "expr": "medicitas_dlq_size", "legendFormat": "{{queue}}" }
+      ],
+      "description": "Mensajes que agotaron sus reintentos (MAX_REINTENTOS) y no se pudieron procesar. Cualquier valor > 0 sostenido amerita revisión manual."
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU del proceso backend (núcleos)",
+      "gridPos": { "x": 0, "y": 33, "w": 8, "h": 6 },
+      "targets": [
+        { "expr": "rate(process_cpu_user_seconds_total{job=\"medicitas-backend\"}[1m]) + rate(process_cpu_system_seconds_total{job=\"medicitas-backend\"}[1m])", "legendFormat": "CPU" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Memoria residente del proceso backend",
+      "gridPos": { "x": 8, "y": 33, "w": 8, "h": 6 },
+      "targets": [
+        { "expr": "process_resident_memory_bytes{job=\"medicitas-backend\"}", "legendFormat": "RSS" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Conexiones HTTP activas",
+      "gridPos": { "x": 16, "y": 33, "w": 8, "h": 6 },
+      "targets": [
+        { "expr": "http_active_connections{job=\"medicitas-backend\"}", "legendFormat": "activas" }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Errores en vivo (correlacionar con las aperturas de circuito de arriba)",
+      "gridPos": { "x": 0, "y": 39, "w": 24, "h": 9 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        { "expr": "{app=\"medicitas-backend\"} | json | level >= 40", "queryType": "range" }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "refresh": "10s"
+}

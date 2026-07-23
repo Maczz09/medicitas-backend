@@ -127,6 +127,11 @@ UNA traza que cruza pacientes → seguros → citas → pagos → **facturación
 (comprobante+PDF)** → **notificaciones (SMS)** → auditoría. El resumen de k6
 imprime `cascadas_completas` = cuántas cadenas full-stack se completaron.
 
+> **¿Cómo simula usuarios reales `carga-full.js`?**
+> 1. **Login unificado (Super-Rol):** En la clínica real, un flujo completo requiere saltar entre 3 roles (Paciente que reserva, Admisión que cobra, Médico que atiende). Para la prueba de carga, hacer 3 logins por cada cascada saturaría artificialmente el servicio de auth. Por ello, el script hace login **una sola vez al inicio** (`setup()`) usando el rol de **Auditor** (`auditor@medicitas.pe`), el cual tiene privilegios transversales en todos los módulos, permitiendo completar el flujo de inicio a fin con un solo token compartido.
+> 2. **Creación dinámica de pacientes:** En cada cascada de escritura, k6 genera un paciente nuevo al azar (con DNI aleatorio), simulando un flujo real de nuevos registros sin estancarse con los mismos datos.
+> 3. **Distribución entre médicos:** En lugar de apuntar todas las nuevas citas a un solo calendario (lo que causaría falsas "colisiones" de horario), el script descubre en vivo todos los médicos con agenda disponible y **reparte las citas aleatoriamente** entre ellos.
+
 ### 3.2) FLUJO CLÍNICO COMPLETO — la "traza reina" (1 comando)
 
 Los flujos de HCL y farmacia exigen cita de HOY + En_Atencion, así que la carga

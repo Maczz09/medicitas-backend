@@ -15,6 +15,34 @@
 #   - USE_MOCK_SMS=true     → notificaciones por mock, sin levantar Chromium
 #                             (libera CPU/RAM durante la carga).
 #   - MySQL max_connections=500 → headroom para (workers × DB_POOL_SIZE).
+#   - CB_VOLUME_THRESHOLD=40 / CB_ERROR_THRESHOLD_PERCENTAGE=60 → los circuit
+#     breakers internos (ej. Citas→Pacientes) toleran más antes de abrir.
+#   - TIMEOUT_SCHEDULE_MS=4000,6000,10000 / CB_TIMEOUT_MS=10500 → el primer
+#     intento de cada llamada S2S (interna o externa) tiene más margen antes
+#     de contarse como fallo.
+#
+# IMPORTANTE — causa raíz real de los 503 "SERVICIO_PACIENTES_NO_DISPONIBLE"
+# en una corrida full, no solo síntoma: `conReintentos` llama a
+# `breaker.fire()` UNA VEZ POR INTENTO (hasta 3), y opossum cuenta CADA
+# fire() por separado en su ventana de 10s — no el resultado final tras
+# reintentar. El primer intento solo tiene 2000ms (TIMEOUT_SCHEDULE_MS
+# default). Bajo 80 VUs sostenidos, la llamada interna Citas→Pacientes a
+# veces tarda un poco más de 2s porque está en COLA (por el pool de MySQL
+# compartido o el event loop), no porque Pacientes esté caído — pero ese
+# primer intento ya se cuenta como fallo del circuito, aunque el reintento
+# (con 4s) hubiera funcionado. Si varios de esos "casi-timeout" caen en la
+# misma ventana de 10s, el circuito abre y mata en seco TODAS las llamadas en
+# curso, incluidas las que iban a tener éxito. Subir el timeout del primer
+# intento (no solo el umbral del circuito) ataca la causa: menos primeros
+# intentos se leen como fallo en absoluto.
+#
+# IMPORTANTE — los circuit breakers internos NO son el problema, son
+# demasiado sensibles PARA ESTE MODO. El default de .env (CB_VOLUME_THRESHOLD=5,
+# CB_ERROR_THRESHOLD_PERCENTAGE=50%) está afinado para el DEMO en vivo del
+# kill-switch: con esos valores, apagar un módulo y ver el circuito abrirse
+# casi al instante es justo el efecto pedagógico que se busca. Se sube el
+# umbral SOLO en este overlay — el kill-switch de la demo (docker-compose.yml
+# sin este overlay) sigue tan sensible como siempre.
 #
 # IMPORTANTE — right-sizing del pool (lección aprendida en la 1ª corrida):
 # el cuello de botella NO es Node sino MySQL. Con 10 workers × 20 pool = 200
@@ -31,6 +59,12 @@ services:
       CLUSTER_MODE: "true"
       WEB_CONCURRENCY: "${WEB_CONCURRENCY:-6}"
       DB_POOL_SIZE: "${DB_POOL_SIZE:-8}"
+      CB_VOLUME_THRESHOLD: "${CB_VOLUME_THRESHOLD:-40}"
+      CB_ERROR_THRESHOLD_PERCENTAGE: "${CB_ERROR_THRESHOLD_PERCENTAGE:-60}"
+      # Primer intento con más margen (ver nota arriba) — CB_TIMEOUT_MS debe
+      # seguir siendo MAYOR que el último valor del schedule (10000+500).
+      TIMEOUT_SCHEDULE_MS: "${TIMEOUT_SCHEDULE_MS:-4000,6000,10000}"
+      CB_TIMEOUT_MS: "${CB_TIMEOUT_MS:-10500}"
       USE_MOCK_SMS: "true"
       # Log de acceso HTTP: ENCENDIDO también en carga. LOAD_TEST_MODE=true lo
       # apagaba (ver httpLogger.middleware.js) para no inundar Loki a >1000

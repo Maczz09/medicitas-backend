@@ -26,6 +26,7 @@ const segurosWebhookRouter = require('./modules/seguros/routes/webhook.routes');
 const twilioWebhook = require('./shared/infrastructure/webhooks/twilio.webhook');
 const { realtimeRouter } = require('./shared/infrastructure/realtime.routes');
 const serviceSwitchRouter = require('./shared/infrastructure/serviceSwitch.routes');
+const circuitosRouter = require('./shared/infrastructure/circuitos.routes');
 const { killSwitch } = require('./shared/infrastructure/killSwitch.middleware');
 
 const app = express();
@@ -164,6 +165,7 @@ app.use('/api/v2/citas', killSwitch('citas'), citasRoutes);
 app.use('/api/v2/coberturas', killSwitch('seguros'), segurosRoutes);
 app.use('/api/v2/pagos', killSwitch('pagos'), pagosRouter);
 app.use('/api/v2/admin/servicios', serviceSwitchRouter);
+app.use('/api/v2/admin/circuitos', circuitosRouter);
 app.use('/api/v2/historias-clinicas', killSwitch('historias-clinicas'), hclRouter);
 app.use('/api/v2/prescripciones', killSwitch('prescripciones'), preRouter);
 app.use('/api/v2/facturacion', killSwitch('facturacion'), facRouter);

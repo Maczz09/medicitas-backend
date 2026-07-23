@@ -104,8 +104,17 @@ const dlqSizeGauge = new client.Gauge({
 
 const circuitBreakerStateGauge = new client.Gauge({
   name: 'medicitas_circuit_breaker_state',
-  help: 'Estado del Circuit Breaker (0=Cerrado, 1=Abierto, 2=Medio Abierto)',
+  help: 'Estado del Circuit Breaker (0=Cerrado, 1=Medio Abierto, 2=Abierto)',
   labelNames: ['service'],
+  // En CLUSTER_MODE cada worker tiene su PROPIA instancia de breaker en
+  // memoria — prom-client agrega un Gauge entre workers SUMANDO por defecto,
+  // lo que para un estado enumerado (0/1/2) da números sin sentido (ej. 2
+  // workers en "Abierto"=2 suman 4, indistinguible de otras combinaciones; con
+  // 6 workers se ven valores como 7-8). 'max' hace que el clúster reporte el
+  // PEOR estado visto en cualquier worker — semánticamente correcto para un
+  // dashboard ("¿algo está roto en algún lado?"), por eso Abierto=2 (más alto
+  // = más severo) en vez del 1 original.
+  aggregator: 'max',
   registers: [register],
 });
 
@@ -142,8 +151,10 @@ module.exports = {
 // compartida (shared/resilience/circuitBreaker.js) la semilla en el momento en
 // que CADA breaker se construye, para los 12 servicios (antes solo cubría
 // AseguradoraAPI, dejando "no data" para cualquier otro breaker nuevo).
-outboxPendingGauge.set({ service: 'medicitas-workers' }, 0);
-dlqSizeGauge.set({ queue: 'medicitas-dlq' }, 0);
+// outboxPendingGauge/dlqSizeGauge YA NO se semillan aquí con una etiqueta
+// placeholder ('medicitas-workers'/'medicitas-dlq' — nunca fueron un
+// service/queue real): shared/infrastructure/metricsPoller.js las puebla con
+// datos reales por esquema/cola pocos segundos después del arranque.
 pagosMontoTotal.inc({ metodo_pago: 'TARJETA' }, 0);
 pagosCompletadosCounter.inc({ metodo_pago: 'TARJETA' }, 0);
 citasCreadasCounter.inc({ especialidad: 'General' }, 0);

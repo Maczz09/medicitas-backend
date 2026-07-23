@@ -2,6 +2,7 @@ const { DomainError } = require('../../../../shared/domain/errors');
 const { DiagnosticoCIE10 } = require('../../domain/value-objects/DiagnosticoCIE10');
 const { PrescripcionClinica } = require('../../domain/value-objects/PrescripcionClinica');
 const { v4: uuidv4 } = require('uuid');
+const logger = require('../../../../shared/logger/logger');
 
 class RegistrarConsultaUseCase {
   constructor({ expedienteRepository, encuentroRepository, citaValidator, eventPublisher, getConnection }) {
@@ -121,9 +122,27 @@ class RegistrarConsultaUseCase {
         encuentrosHclCounter.inc();
       } catch { /* la métrica nunca debe romper el registro */ }
 
-      // Best-effort: mover la cita a Completada. El encuentro ya está guardado.
-      this.citaValidator.completarCita(dto.idCita).catch((err) => {
-        console.warn(`[HCL] No se pudo completar cita ${dto.idCita}: ${err.message}`);
+      // Best-effort: mover la cita a Completada. El encuentro ya está
+      // guardado (correcto, nunca se pierde) — esto es un efecto secundario
+      // no crítico, así que no bloquea la respuesta al médico.
+      this.citaValidator.completarCita(dto.idCita).catch(async (err) => {
+        if (err.codigo === 'CITA_TRANSICION_INVALIDA') {
+          // Citas ya rechazó esta transición (409, p. ej. la cancelaron
+          // mientras tanto) — no es reconciliable con un reintento, es un
+          // hecho de negocio definitivo. Se alerta, nunca se marca pendiente.
+          logger.warn({ idCita: dto.idCita, idEncuentro, err: err.message }, '[HCL] Citas rechazó completar la cita — no se reintentará');
+          await this._publicarInconsistencia(idEncuentro, dto.idCita, err.message, correlationId);
+          return;
+        }
+        // Dependencia inalcanzable (timeout, circuito abierto) — se persiste
+        // pendiente para que el recovery-replay de historiaClinica.routes.js
+        // la reconcilie en cuanto Citas se recupere.
+        logger.warn({ idCita: dto.idCita, idEncuentro, err: err.message }, '[HCL] No se pudo completar la cita — queda pendiente de reconciliar');
+        try {
+          await this.encuentroRepository.marcarCitaPendienteReconciliar(idEncuentro);
+        } catch (e) {
+          logger.error({ err: e, idEncuentro }, '[HCL] No se pudo marcar el encuentro como pendiente de reconciliar');
+        }
       });
 
       return {
@@ -139,6 +158,27 @@ class RegistrarConsultaUseCase {
       await conn.rollback();
       if (err instanceof DomainError) throw err;
       throw new DomainError('ERROR_INTERNO_HCL', 'Error al registrar encuentro clínico', 500);
+    } finally {
+      conn.release();
+    }
+  }
+
+  // Se llama SOLO desde el .catch() post-commit de completarCita() cuando
+  // Citas rechazó la transición con 409 — nunca marca el encuentro como
+  // pendiente (no hay nada que reintentar), solo deja constancia para
+  // revisión humana. Abre su propia conexión/TX (fuera de la TX principal,
+  // ya liberada).
+  async _publicarInconsistencia(idEncuentro, idCita, motivo, correlationId) {
+    const conn = await this.getConnection();
+    await conn.beginTransaction();
+    try {
+      await this.eventPublisher.publish(conn, 'CitaCompletadaInconsistente', {
+        idEncuentro, idCita, motivo,
+      }, correlationId);
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      logger.error({ err, idEncuentro, idCita }, '[HCL] No se pudo registrar la inconsistencia de completar cita');
     } finally {
       conn.release();
     }

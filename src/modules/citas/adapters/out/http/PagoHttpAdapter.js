@@ -18,7 +18,7 @@ class PagoHttpAdapter {
     });
     this.internalToken = process.env.INTERNAL_SERVICE_TOKEN?.trim();
 
-    const { breaker } = crearCircuitBreaker({
+    const { breaker, registrarRecuperacion } = crearCircuitBreaker({
       nombreServicio: NOMBRE_SERVICIO,
       servicioAfectado: 'Pagos',
       accion: this._llamarPagos.bind(this),
@@ -27,6 +27,7 @@ class PagoHttpAdapter {
       errorFilter: (err) => err.response?.status === 404,
     });
     this.breaker = breaker;
+    this.registrarRecuperacion = registrarRecuperacion;
   }
 
   // `intento` (1-based) lo reenvía opossum desde breaker.fire(idCita, intento).

@@ -21,6 +21,7 @@ class EncuentroMySQLRepository {
            id_encuentro            AS idEncuentro,
            id_cita                 AS idCita,
            id_medico               AS idMedico,
+           cita_completada_verificada AS citaCompletadaVerificada,
            fecha_hora              AS fecha,
            diagnostico_cie10       AS diagnosticoCie10,
            diagnostico_descripcion AS descripcion
@@ -54,6 +55,7 @@ class EncuentroMySQLRepository {
 
       const encuentros = rows.map((enc) => ({
         ...enc,
+        citaCompletadaVerificada: !!enc.citaCompletadaVerificada,
         prescripciones: porEncuentro.get(enc.idEncuentro) || [],
       }));
 
@@ -76,6 +78,53 @@ class EncuentroMySQLRepository {
         encuentro.diagnosticoCie10, encuentro.descripcion, encuentro.fechaEncuentro
       ]
     );
+  }
+
+  // Se llama post-commit (fuera de la TX de save(), ya liberada) cuando
+  // completarCita() falló por Citas inalcanzable — abre su propia conexión.
+  async marcarCitaPendienteReconciliar(idEncuentro) {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.execute(
+        'UPDATE svc_hcl.encuentros_clinicos SET cita_completada_verificada = 0 WHERE id_encuentro = ?',
+        [idEncuentro]
+      );
+    } finally {
+      conn.release();
+    }
+  }
+
+  // Encuentros cuya cita no se pudo confirmar como Completada — candidatos a
+  // reconciliar cuando HistoriaClinica→Citas se recupera. Newest-first, mismo
+  // criterio que Seguros/Pagos: el registro reciente, con alguien mirando la
+  // pantalla, se beneficia más de una corrección instantánea que uno viejo.
+  async findPendientesCompletarCita(limit) {
+    const conn = await this.pool.getConnection();
+    try {
+      const limiteSeguro = Number.isInteger(Number(limit)) ? Number(limit) : 20;
+      const [rows] = await conn.query(
+        `SELECT id_encuentro AS idEncuentro, id_cita AS idCita
+         FROM svc_hcl.encuentros_clinicos
+         WHERE cita_completada_verificada = 0
+         ORDER BY fecha_hora DESC
+         LIMIT ${limiteSeguro}`
+      );
+      return rows;
+    } finally {
+      conn.release();
+    }
+  }
+
+  // Recibe conexión de la TX del caller (recovery-replay). Devuelve
+  // affectedRows para que el caller detecte si otro worker del clúster ya
+  // reconcilió esta fila antes y evite publicar un evento duplicado.
+  async marcarCitaCompletadaVerificada(idEncuentro, connection) {
+    const [result] = await connection.execute(
+      `UPDATE svc_hcl.encuentros_clinicos SET cita_completada_verificada = 1
+       WHERE id_encuentro = ? AND cita_completada_verificada = 0`,
+      [idEncuentro]
+    );
+    return result.affectedRows;
   }
 
   async savePrescripcion(prescripcion, connection) {

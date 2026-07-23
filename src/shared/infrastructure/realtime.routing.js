@@ -13,6 +13,8 @@ const MAPA_ROLES_POR_EVENTO = {
   CitaExpirada: ['Recepcionista', 'Médico', 'Auditor'],
   IngresoRegistrado: ['Recepcionista', 'Médico', 'Auditor'],
   IngresoRevertido: ['Recepcionista', 'Médico', 'Auditor'],
+  IngresoPagoVerificado: ['Recepcionista', 'Médico', 'Auditor'],
+  IngresoPagoInconsistente: ['Recepcionista', 'Médico', 'Auditor'],
   // Sin GET dedicado — criterio propio: es un evento de auditoría de intentos
   // de reserva colisionados, no algo que un Médico necesite ver en vivo.
   IntentoReserva: ['Recepcionista', 'Auditor'],
@@ -38,12 +40,15 @@ const MAPA_ROLES_POR_EVENTO = {
   // facturacion.routes.js:38/60 — GET /api/v2/facturacion/...
   ComprobanteGenerado: ['Recepcionista', 'Auditor'],
   ComprobanteEmitido: ['Recepcionista', 'Auditor'],
+  ComprobanteNombreVerificado: ['Recepcionista', 'Auditor'],
 
   // historiaClinica.routes.js:95/125 — sin Recepcionista, a diferencia de los demás módulos
   ExpedienteCreado: ['Médico', 'Auditor'],
   EncuentroRegistrado: ['Médico', 'Auditor'],
   EncuentroClinicoRegistrado: ['Médico', 'Auditor'],
   PrescripcionEmitida: ['Médico', 'Auditor'],
+  CitaCompletadaReconciliada: ['Médico', 'Auditor'],
+  CitaCompletadaInconsistente: ['Médico', 'Auditor'],
 
   // prescripciones.routes.js:138 — GET /api/v2/prescripciones
   RecetaEmitida: ['Médico', 'Recepcionista', 'Auditor'],

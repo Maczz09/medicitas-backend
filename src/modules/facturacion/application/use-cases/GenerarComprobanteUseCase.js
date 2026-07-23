@@ -72,10 +72,16 @@ class GenerarComprobanteUseCase {
     }
 
     let nombrePaciente = null;
+    let nombreVerificado = true; // false solo si Pacientes estaba inalcanzable (no un 404 limpio)
     try {
       nombrePaciente = await this.pacienteDatos.obtenerNombre(idPaciente);
     } catch (err) {
-      logger.warn({ idPaciente }, 'No se pudo obtener nombre del paciente. Usando ID como fallback.');
+      // Fail-safe: el comprobante se emite igual (el nombre es puramente
+      // cosmético para el PDF, no participa en ningún cálculo de negocio) —
+      // se persiste nombreVerificado=false para que el recovery-replay
+      // (server.js) lo reconcilie en cuanto Pacientes se recupere.
+      nombreVerificado = false;
+      logger.warn({ idPaciente, err: err.message }, 'Pacientes no disponible al generar el comprobante — se emite sin nombre, queda pendiente de reconciliar');
     }
 
     // El PDF ya NO se escribe a disco: se valida que se puede generar (en
@@ -95,7 +101,7 @@ class GenerarComprobanteUseCase {
       throw err;
     }
 
-    comprobante.marcarEmitido(null, urlDescarga, nombrePaciente);
+    comprobante.marcarEmitido(null, urlDescarga, nombrePaciente, nombreVerificado);
 
     const conn2 = await this.getConnection();
     await conn2.beginTransaction();

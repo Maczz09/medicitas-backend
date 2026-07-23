@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS citas (
                     'Cancelada',
                     'No_Asistida'
                   ) NOT NULL DEFAULT 'Pendiente',
+  pago_verificado TINYINT(1)   NOT NULL DEFAULT 1,
   correlation_id  VARCHAR(36)  NULL,
   recordatorio_30m TINYINT(1)  NOT NULL DEFAULT 0,
   alerta_min0     TINYINT(1)   NOT NULL DEFAULT 0,
@@ -139,7 +140,8 @@ CREATE TABLE IF NOT EXISTS citas (
   PRIMARY KEY (id),
   INDEX idx_estado_fecha   (estado, fecha_hora),
   INDEX idx_medico_fecha   (id_medico, fecha_hora),
-  INDEX idx_paciente       (id_paciente)
+  INDEX idx_paciente       (id_paciente),
+  INDEX idx_pago_ingreso_pendiente (pago_verificado, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS outbox (
@@ -192,12 +194,14 @@ CREATE TABLE IF NOT EXISTS encuentros_clinicos (
   id_expediente VARCHAR(36)   NOT NULL,
   id_medico     VARCHAR(36)   NOT NULL,
   id_cita       VARCHAR(36),
+  cita_completada_verificada TINYINT(1) NOT NULL DEFAULT 1,
   fecha_hora    DATETIME      NOT NULL,
   diagnostico_cie10 VARCHAR(20),
   diagnostico_descripcion TEXT,
   notas_evolucion TEXT,
   created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id_encuentro)
+  PRIMARY KEY (id_encuentro),
+  INDEX idx_cita_completar_pendiente (cita_completada_verificada, fecha_hora)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS prescripciones_clinicas (
@@ -359,6 +363,7 @@ CREATE TABLE IF NOT EXISTS comprobantes (
   ruta_pdf              VARCHAR(500),
   url_descarga          VARCHAR(500),
   nombre_paciente       VARCHAR(200),
+  nombre_verificado     TINYINT(1)    NOT NULL DEFAULT 1,
   error_mensaje         TEXT,
   intentos_generacion   INT           NOT NULL DEFAULT 0,
   correlation_id        VARCHAR(36),
@@ -369,7 +374,8 @@ CREATE TABLE IF NOT EXISTS comprobantes (
   UNIQUE KEY uk_numero (numero),
   KEY idx_paciente (id_paciente),
   KEY idx_estado (estado),
-  KEY idx_created (created_at)
+  KEY idx_created (created_at),
+  KEY idx_nombre_pendiente (nombre_verificado, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS series_comprobante (

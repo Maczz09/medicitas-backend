@@ -151,6 +151,16 @@ export function setup() {
   const pacs = http.get(`${BASE}/api/v2/pacientes?pagina=1&porPagina=1`, hd);
   try { data.pacienteId = pacs.json('data.0.id_paciente') || pacs.json('data.0.id'); } catch (e) { /* ignore */ }
 
+  // Preparar datos: asegurar que el paciente de prueba usado para las lecturas masivas 
+  // tenga un expediente clínico. Si ya lo tiene, el backend devolverá 409 (Idempotencia/Conflicto), 
+  // lo cual es seguro. Si no lo tiene, lo crea y así evitamos el 404 en los logs.
+  if (data.pacienteId) {
+    http.post(`${BASE}/api/v2/historias-clinicas/expedientes`, 
+      JSON.stringify({ idPaciente: data.pacienteId }), 
+      h(token, { 'Idempotency-Key': unico() })
+    );
+  }
+
   const citas = http.get(`${BASE}/api/v2/citas`, hd);
   try { data.citaId = citas.json('data.0.id'); } catch (e) { /* ignore */ }
 

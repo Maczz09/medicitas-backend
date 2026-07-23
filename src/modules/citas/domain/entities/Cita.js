@@ -9,7 +9,7 @@ const CitaEstado = Object.freeze({
 });
 
 class Cita {
-  constructor({ id, idPaciente, idMedico, fechaHora, especialidad, estado, correlationId, recordatorio30m, alertaMin0, alertaMin5, alertaMin10 }) {
+  constructor({ id, idPaciente, idMedico, fechaHora, especialidad, estado, correlationId, recordatorio30m, alertaMin0, alertaMin5, alertaMin10, pagoVerificado }) {
     this.id            = id;
     this.idPaciente    = idPaciente;
     this.idMedico      = idMedico;
@@ -17,6 +17,11 @@ class Cita {
     this.especialidad  = especialidad;
     this.estado        = estado || CitaEstado.PENDIENTE;
     this.correlationId = correlationId || null;
+    // Default true a propósito (no `|| true`, que convertiría un false real
+    // en true): cubre "no se exige pago para ingreso" y "pago verificado con
+    // éxito". Solo es false cuando RegistrarIngresoUseCase.js lo marca
+    // explícito porque Pagos estaba inalcanzable — ver marcarPagoNoVerificado().
+    this.pagoVerificado = pagoVerificado !== false;
     
     // Flags de tolerance worker
     this.recordatorio30m = recordatorio30m || false;
@@ -32,6 +37,14 @@ class Cita {
       id, idPaciente, idMedico, fechaHora,
       especialidad, estado: CitaEstado.PENDIENTE, correlationId,
     });
+  }
+
+  // Se llama SOLO desde RegistrarIngresoUseCase.js cuando Citas→Pagos estaba
+  // inalcanzable durante registrarIngreso(). Encapsula la mutación del flag
+  // en el dominio (no se toca cita.pagoVerificado directamente desde el use case).
+  marcarPagoNoVerificado() {
+    this.pagoVerificado = false;
+    return this;
   }
 
   registrarIngreso() {

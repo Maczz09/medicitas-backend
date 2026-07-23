@@ -40,7 +40,9 @@ describe('shared/resilience/circuitBreaker', () => {
     }
 
     expect(breaker.opened).toBe(true);
-    expect(await leerGauge('test-cb-open')).toBe(1);
+    // 2 = Abierto (renumerado: aggregator:'max' entre workers del clúster
+    // exige que "Abierto" sea el valor más alto — ver config/metrics.js).
+    expect(await leerGauge('test-cb-open')).toBe(2);
   });
 
   test('rechaza inmediatamente (fail-fast) sin invocar la acción una vez abierto', async () => {
@@ -112,7 +114,7 @@ describe('shared/resilience/circuitBreaker', () => {
     await breaker.fire().catch(() => {}); // sonda — también falla
 
     expect(breaker.opened).toBe(true);
-    expect(await leerGauge('test-cb-reopen')).toBe(1);
+    expect(await leerGauge('test-cb-reopen')).toBe(2);
   });
 
   test('sin registrarRecuperacion() no revienta al cerrar (callback es opcional)', async () => {

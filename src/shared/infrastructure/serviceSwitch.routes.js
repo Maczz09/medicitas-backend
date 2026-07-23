@@ -27,7 +27,14 @@ const MODULOS_TOGGLEABLES = [
  *     security:
  *       - bearerAuth: []
  */
-router.get('/', verifyToken, requireRole('Auditor'), (req, res) => {
+// Lectura de estado abierta a los 3 roles de negocio (no solo Auditor) —
+// mismo criterio que ya usan los eventos SSE ServicioHabilitado/Deshabilitado
+// (realtime.routing.js): es información operativa de salud del sistema, no
+// dato de negocio confidencial. El frontend la usa para sincronizar el
+// ResilienceBanner al cargar/recargar la página, antes de que llegue
+// cualquier evento en vivo. El PATCH de abajo (togglear de verdad) sigue
+// siendo exclusivo de Auditor.
+router.get('/', verifyToken, requireRole('Recepcionista', 'Médico', 'Auditor'), (req, res) => {
   const data = Object.fromEntries(MODULOS_TOGGLEABLES.map((m) => [m, estaHabilitado(m)]));
   res.json({ data, correlationId: req.correlationId, timestamp: new Date().toISOString() });
 });
